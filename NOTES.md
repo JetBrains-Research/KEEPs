@@ -132,7 +132,7 @@ To think:
 
 Thoughts:
 - In example: 
-  ```
+  ```kotlin
     interface B<T>
     interface C<T> : B<T>
     interface D<T> : B<T>
@@ -187,6 +187,10 @@ Thoughts:
   fun <T> foo(v: Int | A<T>) {}
       
   foo(v as Int | B<Int> | C<String>)
+  
+  A<T> :> B<Int> | C<String> =>
+  A<T> :> B<Int> & A<T> :> C<String>
+  T = Int & T = String
   ```
   We are able to typecheck a call by instantiating T with `? extends Serializable & Comparable`.
   Not sure if typechecker ready for such inference.
@@ -258,6 +262,7 @@ Semantics:
   - May they be just a union of errors (aka `Int | T`)
     - I guess so as we are looking for `Int | T` as `Result<Int, T>`.
     - Inference does not looks harder than for the first case.
+    - But case with `Int | Err1 | T` is the other case
 
 I think that we should start with the formalization of syntactic sugar for `Result<>` without considering any unions.
 It allows us to answer any questions about interpreting `Int?` as `Result<Int, Null>` and list all possible use-cases where unions may encounter. 
@@ -270,3 +275,9 @@ And it will just pack the left value into the inline class.
 How to handle this case for unions?
 Do we have to merge errors or pack result in the same way?
 
+## June 11
+
+- Ask Marat how do they implemented resolution of constraint (`A<> & B<> :> C<>`). (because why mot the same for intersections?)
+- Ask marat what is the intersection in Java we did not found anything.
+- Choose one option: Generics or multiple inheritance. (without generics it may in theory be not disjoint)
+- How to separate `return_error`
