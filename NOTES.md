@@ -281,3 +281,44 @@ Do we have to merge errors or pack result in the same way?
 - Ask marat what is the intersection in Java we did not found anything.
 - Choose one option: Generics or multiple inheritance. (without generics it may in theory be not disjoint)
 - How to separate `return_error`
+
+## June 12
+
+Today we are trying to make a first step in formalization: Formalize the T? as T | Null (or Either<T, Null>).
+
+1. We are introducing a new type `Null`.
+   - `Any :> Null :> Nothing`
+   - `Null` is closed for inheritance. (surprise-surprise)
+2. We are introducing a new type `T | V`, error union type.
+   Where `T` and `V` are arbitrary types (disjoint).
+   (Maybe limit for now `V` to `Null` or `Nothing`?)
+   - `T = T | Nothing`
+   - `T1 | V1 :> T2 | V2` if `T1 :> T2` and `V1 :> V2`
+   - Consequently, `T | V :> T`
+   - `null : Nothing | Null`
+3. Let's review the smart-casts in a new setting.
+   Not sure why it may change anything?
+   - `v === null`. `v : typeof(v) & Nothing | Null = Nothing | Null`
+   - `v == null`. same as above.
+   - `v ?: run { }`.
+     - In the `run` we have  `v : typeof(v) & Nothing | Any`
+     - If run returns in the consecutive code `v : typeof(v) & Any | Nothing`
+   - `when (v) { is T -> }`
+     - Inside the block `v : typeof(v) & T | Nothing`
+   - `v as T`. same as above.
+   - `v as? T`.
+4. We are introducing function `failure : T -> Nothing | T`
+5. Formalize syntax sugar
+   - Monad return
+     - `T?` is `T | Null`
+     - Otherwise, you have to explicitly annotate the error type. (so far)
+     - For inference of a return type, everything is straightforward.
+       - `return null` is automatically inferred to the correct type and does not have to be boxed
+       - Other errors will be boxed in `failure` function.
+   - Monad bind.
+     - Actually runtime operations are the same as current?
+       - Because it is actually the same as `Result<>`
+     - How to get a value of error?
+       - Function `ofFailure: Nothing | T -> T`
+     - How to smart-cast it to `Nothing | T`?
+       - For `is` check due to disjointness we are able to understand if it is checked for an error or value type.
