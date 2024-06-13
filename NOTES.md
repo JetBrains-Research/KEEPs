@@ -322,3 +322,14 @@ Today we are trying to make a first step in formalization: Formalize the T? as T
        - Function `ofFailure: Nothing | T -> T`
      - How to smart-cast it to `Nothing | T`?
        - For `is` check due to disjointness we are able to understand if it is checked for an error or value type.
+
+## Meeting
+
+- Inference, not `failure` or `return_error`
+  - We need soft and hard unions
+- research all possibilities about type leak
+- `v : Err1 | Err2` is ok
+- No inference of errors in return type
+- No exponent
+- It is ok to have separate elvis operator
+- `T?` -> `T | Null` is useless (useful, but totally not a priority)
