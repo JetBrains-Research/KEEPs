@@ -330,6 +330,41 @@ Today we are trying to make a first step in formalization: Formalize the T? as T
 - research all possibilities about type leak
 - `v : Err1 | Err2` is ok
 - No inference of errors in return type
-- No exponent
-- It is ok to have separate elvis operator
+- No exponent from multiple inheritance
+- It is ok to have a separate elvis operator
 - `T?` -> `T | Null` is useless (useful, but totally not a priority)
+
+## June 13
+
+- We forgot to ask about runtime representation.
+- Hew question: do we want to have type `Nothing | T`?
+
+- Soft and hard union rules
+  - We do not infer unions in a type checker
+  - Hard union is when we either propagated the expected type, and it is union (whether annotated or inferred does not matter)
+  - Hard union is when we received a value with union type and trying to apply any transformation to it.
+
+- Type leak
+  - The first leak is when we have error of unions as a value
+    - Ignore it until we have use-cases
+  - The second leak is when we got a unions as a result of system resolutions
+    - Let's investigate it
+    - No multiple inheritance.
+    - Actually there is no leak in case `A<T> :> B<Int> | C<String>`. 
+      It is just a constraints: `T :> Int & T :> String`
+      As we did not have union on any side, we did not expect a result to be a union.
+      If we have something like `T :> Int | Err1 & T :> String`.
+      We will have `Serializable & Comparable | Err1`.
+      Actually, we are not able to not solve any system due to this constraint.
+      To fail it, we have to have upper bound constraint that will be `Int | String`, 
+      which is impossible as we do not have such types in the system.
+    - And the behaviour is ok as it is the same as now.
+      And even changing it will break backward compatibility.
+
+- We may allow generics only in final class and it works
+
+TODO for a week:
+- Unions in different languages
+- Effects as error processing
+  - And other error processing
+
