@@ -75,7 +75,7 @@ To do:
 ## June 6
 
 To discuss:
-- Concern: Introduction of union error types can introduce common unions internally (Is the compiler read for it?)
+- Concern: Introduction of union error types can introduce common unions internally (Is the compiler ready for it?)
 
 To think:
 - Will error types form a separate hierarchy?
@@ -112,7 +112,7 @@ To think:
 - Is variance affected by unions?
     - T: read about scala
 - Runtime semantics of union? Is it the same as in `Result<>`
-- At the moment we would like to make a constraint from subtypings of union types
+- At the moment we would like to make a constraint from subtyping of union types
   ```
     interface B<T>
     interface C<T> : B<T>
@@ -337,7 +337,7 @@ Today we are trying to make a first step in formalization: Formalize the T? as T
 ## June 13
 
 - We forgot to ask about runtime representation.
-- Hew question: do we want to have type `Nothing | T`?
+- New question: do we want to have type `Nothing | T`?
 
 - Soft and hard union rules
   - We do not infer unions in a type checker
@@ -368,3 +368,186 @@ TODO for a week:
 - Effects as error processing
   - And other error processing
 
+
+## July 23
+
+### Local errors
+
+> One of the motivating examples given in the talk was about lastOrNull(predicate) on a list of String? and not being able to distinguish between a null value being found versus the list not containing a value that matches the predicate. While errors could disambiguate that scenario, note that the problem isn't eliminated as we have the same issue when processing a list of errors. In that case, we wouldn't be able to disambiguate between finding that error value in the list versus the function not finding an error value that matches the predicate.
+
+There will be no problem in such case if the error case is boxed.
+(Which I highly recommend)
+
+But there may be a case when `T = V | NotFound`.
+So we have to create a unique error for our `last` function.
+Which is not allowed to leave a function.
+Is it possible to track it?
+
+If it leaves a function, we will encounter the same issue.
+Would we like to create an error which is not equal to any other?
+Do we want to fix this case at all?
+As it sounds like a very rare case which is also hard to fix.
+
+It is already looks like attributes of types, not error type.
+In theory it is possible to implement it in unsafe way:
+
+```kotlin
+error object NotFound // new category of types
+
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+  error object NotFoundInternal  
+  var last: T | NotFoundInternal = NotFoundInternal
+  for (element in this) {
+    if (predicate(element)) {
+      last = element
+    }
+  }
+  if (last == NotFoundInternal) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+  return last // smart-cast to T
+}
+```
+
+But in this approach we rely on a programmer to not leak `NotFoundInternal` outside the function.
+
+Additionally, we encounter the same issue as was with lambdas on JVM.
+If all functions will declare their own internal errors, we will have a lot of classes in the heap + a lot of class-loadings.
+
+We may implement something like tagged errors.
+It is not what was proposed in the quip, as it will not lead to re-packing of values on each call.
+Tag will be assigned in the function of instantiation and will be of form "tag$functionName$packageName".
+
+Should we prohibit to leak this kind of errors out of function? (But how? Prohibit upcasting to Any?)
+Or should we leave it on a programmer?
+With this it will look like this:
+
+```kotlin
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+  var last: T | `NotFound = `NotFound
+  for (element in this) {
+    if (predicate(element)) {
+      last = element
+    }
+  }
+  if (last == `NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+  return last // smart-cast to T
+}
+```
+
+Such tag does not allowed to have a value.
+Under the hood it is a single for all of them class:
+
+```kotlin
+error class TagError(tag: String)
+```
+
+### Error type inference
+
+They said that they do not want to infer error types.
+What about lambdas and expression bodies?
+
+```kotlin
+fun foo(lst: List<Int>) {
+    lst.map<_, Double | MyError> {
+        if (it >= 0) {
+            sqrt(it.toDouble())
+        } else {
+            MyError
+        }
+    }
+}
+```
+
+Looks verbose.
+Other approaches:
+
+```kotlin
+fun foo(lst: List<Int>) {
+    lst.map {
+        if (it >= 0) {
+            sqrt(it.toDouble()) as Double | Nothing
+        } else {
+            MyError
+        }
+    }
+}
+```
+
+```kotlin
+fun foo(lst: List<Int>) {
+    lst.map {
+        if (it >= 0) {
+            sqrt(it.toDouble())
+        } else {
+            MyError as Nothing | MyError
+        }
+    }
+}
+```
+
+```kotlin
+fun foo(lst: List<Int>) {
+    lst.map {
+        if (it >= 0) {
+            sqrt(it.toDouble())
+        } else {
+            failure(MyError)
+            // failure is not required in other cases
+        }
+    }
+}
+```
+
+Maybe we need a syntax for it:
+
+```kotlin
+fun foo(lst: List<Int>) {
+    lst.map {
+        if (it >= 0) {
+            sqrt(it.toDouble())
+        } else {
+            MyError!
+        }
+    }
+}
+```
+
+### Generics vs multiple inheritance
+
+There were no questions about multiple inheritance in the issue => it is unneseccary.
+So let's prefer generics.
+
+There was a point to investigate a possible union leaks.
+But I guess it was resolved to there are no leaks without multiple inheritance.
+So actually generics with single inheritance rule is ok.
+
+### Unions in different languages
+
+Nothing interesting...
+
+### Other error processing
+
+Nothing interesting except effects.
+Not sure how to relate it.
+
+### Open questions
+
+- Runtime representation of errors pros and cons
+- Inference of boxing moments
+- How it is allowed to interoperate error and common hierarchies
+- ...
+
+So should we start writing a keep?
+
+### KEEP structure
+
+We should elaborate all choices and consequences.
+
+* Motivation (questionable)
+* Structure overview
+* Choices
+  * Generics vs multiple inheritance
+  * Runtime representation
+  * Error type inference
+  * Hierarchy interoperation
+  * ...
+* Problems and options for `last` use-case
