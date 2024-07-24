@@ -395,7 +395,7 @@ In theory it is possible to implement it in unsafe way:
 error object NotFound // new category of types
 
 inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
-  error object NotFoundInternal  
+  error object NotFoundInternal
   var last: T | NotFoundInternal = NotFoundInternal
   for (element in this) {
     if (predicate(element)) {
@@ -439,6 +439,24 @@ Under the hood it is a single for all of them class:
 ```kotlin
 error class TagError(tag: String)
 ```
+
+Another option: Allow function to prohibit some errors in generics (...)
+
+Ideas:
+- Local and non-local tag
+  - Local have "$functionName$packageName" in the tag
+  - For locals we have to add static analysis to check that it will not leave the scope
+  - Non-local is just a name
+  - They are compiled into `TagError` with a tag
+  - How to match and distinguish
+    - We may have only local
+    - We may have only non-local (but it does not solve a problem)
+    - We may have both and different syntaxes (\` and # or \` and \`...@this).
+      In the last option we may have local tags for class/package, but we have to track that they do not leave a scope.
+    - We may have to pack-unpack them depending on the context
+- Aren't this enough?
+  We may add `Any?` or `Array<Any?>` into TagError and declare an associated type somewhere.
+  Java interop!
 
 ### Error type inference
 
@@ -513,7 +531,7 @@ fun foo(lst: List<Int>) {
 
 ### Generics vs multiple inheritance
 
-There were no questions about multiple inheritance in the issue => it is unneseccary.
+There were no questions about multiple inheritance in the issue => it is unnecessary.
 So let's prefer generics.
 
 There was a point to investigate a possible union leaks.
@@ -551,3 +569,38 @@ We should elaborate all choices and consequences.
   * Hierarchy interoperation
   * ...
 * Problems and options for `last` use-case
+
+## July 23
+
+To think:
+- Two trailing lambdas for onSuccess and onFailure
+
+Boxing:
+Pros:
+- Faster checks
+- Allows to have some interop between errors and common types
+Cons: 
+- Boxing
+- Inference of boxing moments
+
+## July 24
+
+### Pre-meeting
+
+Agenda:
+- Tagged errors as a solution for `last`
+  - Problem and simple solution
+  - Lots of classes problem
+  - Solution with tagged errors
+  - Non-local tags using `@this`
+  - Not thread-safe `getInstance`, just const loading when no content
+  - Is this enough?
+- Error type inference
+  - Ask again if we would like to infer error types?
+  - new syntax or failure function
+- Runtime representation
+  - Do we want boxing, or it is just an option?
+- Do we want MyError <: Any
+- Do we want T -> MyError
+- Default behaviour:
+  - Errors accumulated on top?
