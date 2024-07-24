@@ -575,13 +575,28 @@ We should elaborate all choices and consequences.
 To think:
 - Two trailing lambdas for onSuccess and onFailure
 
-Boxing:
+### Boxing
+
 Pros:
 - Faster checks
 - Allows to have some interop between errors and common types
+
 Cons: 
 - Boxing
 - Inference of boxing moments
+
+### Interoperation with common hierarchies
+
+Requires boxing.
+May be misunderstood in case `Serializable | MySerializableError`.
+May be allowed with explicit cast only (`return MySerializableError as Serializable`).
+
+Common class extending error is very strange use-case.
+
+### Inference of boxing moments
+
+failure or syntax sugar => boxing.
+No interoperation or only explicit interoperation => obvious boxing in return statement.chmok
 
 ## July 24
 
@@ -604,3 +619,8 @@ Agenda:
 - Do we want T -> MyError
 - Default behaviour:
   - Errors accumulated on top?
+
+### Meeting
+
+- Marat will think if it is enough to have only tagged errors with typealiases as interfaces.
+- Marat think that inference in lambdas is good.
