@@ -51,6 +51,7 @@ Notes on sources from romanv:
 - https://youtrack.jetbrains.com/issue/KT-186/Support-pattern-matching-with-complex-patterns
   - Use-less holywar about name-based vs positional-based destructuring
     - We should cover both
+  - We have to have a concise syntax if the name of variable matches the name of the field
   - Nice idea for name based:
     ```kotlin
     when (scr) {
@@ -68,6 +69,11 @@ Notes on sources from romanv:
     But it is not Kotliny.
   - JEP: https://openjdk.org/jeps/405
     - Nothing interesting. Strange design for smart-casts.
+  - C#: https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/patterns
+    - "and", "or", "not" for patterns?
+    - Not allowed to mix binding and constrained pattern
+      - In java too
+      - In scala it is done using "@" 
 - https://youtrack.jetbrains.com/issue/OSIP-398/Non-stable-release-for-Object-name-based-destructuring
   - In progress, but no KEEP insofar.
   - Lots of issues with syntax
@@ -85,4 +91,26 @@ Notes on sources from romanv:
 - https://github.com/BlaBlaHuman/kotlin-comprehensions/blob/main/list-comprehension.md
   - Not useful for pattern-matching. 
 
+### Patters syntax:
+
+```
+`pat = is ClassName `destructing?
+`destructing = \(`namedDestructing | `positionalDestructing\)
+`namedDestructing = `binding? .fieldName `condition
+`positionalDestructing = `binding? `condition
+`binding = (val | var) name =
+`condition = `pat | `inCondition | == `equalityCondition | ...
+```
+
+- We have to use either "==" before `equalityCondition` or "." before `fieldName` to distinguish them. otherwise it will be ambiguity.
+- Positional destructing with bindings looks weird...
+- How to align with named destructing?
+
+### Meeting notes:
+
+- We have to either prohibit to simultaneously match and declare variables or introduce a new syntax for it.
+  Because we would like to not introduce a new variable in the scope.
+  - `is Clazz(fieldname is ...)` is an introduction of a new name same as fieldname and pattern on it
+  - `is Clazz(.fieldname is ...)` is just a pattern on a field 
+  - or `is Clazz(_=fieldname is ...)`
 
