@@ -13,4 +13,76 @@ In these notes, we would like to express our vision on pattern matching in Kotli
 
 ## 31 July
 
+- No chances for structural equality in OO languages. 
+- Features:
+  - let/where syntax
+  - lazy syntax and behaviour
+    - Bahaviour with smart-casts (where is it typed?)
+    - Main use-case:
+      ```kotlin
+      lazy val condition1 = ...
+      lazy val condition2 = ...
+      lazy val condition3 = ...
+      lazy val condition4 = ...
+      if (condition1 && condition2 && (condition3 || condition4)) {
+        ...
+      }
+      ```
+    - Why not `inline val`: lazy val may be typed in the context of the first usage 
+  - Guards were already introduced, so out of scope
+  - Pattern matching semantics and predictable & readable syntax
+    - `is Pair(val a, Pair(listOf(1,2), 2))` expands into:
+      ```kotlin
+      scr is Pair &&
+      (scr as Pair).component2().equals(Pair(listOf(1,2), 2))
+      ```
+    - `is Pair(val a, is Pair(listOf(1,2), 2))` expands into:
+      ```kotlin
+      scr is Pair &&
+      (scr as Pair).component2() is Pair &&
+      ((scr as Pair).component2() as Pair).component1().equals(listOf(1,2)) &&
+      ((scr as Pair).component2() as Pair).component2().equals(2)
+      ```
+
+## 1 August
+
+Notes on sources from romanv:
+
+- https://youtrack.jetbrains.com/issue/KT-186/Support-pattern-matching-with-complex-patterns
+  - Use-less holywar about name-based vs positional-based destructuring
+    - We should cover both
+  - Nice idea for name based:
+    ```kotlin
+    when (scr) {
+      is Clazz(val name = .fieldName is ...) -> ...
+    }
+    ```
+    I like the idea of "." before field name because it makes it obvious which of names is field.
+    In this example, it is useless, but if we do not have a declaration, it is better:
+    ```kotlin
+    when (scr) {
+      is Clazz(.fieldName is ...) -> ...
+    }
+    ```
+    Additionally, it helps for IDE to initialize the completion.
+    But it is not Kotliny.
+  - JEP: https://openjdk.org/jeps/405
+    - Nothing interesting. Strange design for smart-casts.
+- https://youtrack.jetbrains.com/issue/OSIP-398/Non-stable-release-for-Object-name-based-destructuring
+  - In progress, but no KEEP insofar.
+  - Lots of issues with syntax
+    - Backward compatibility
+    - Kotliny style
+- https://youtrack.jetbrains.com/issue/KT-43871/Collection-literals
+  - Nothing interesting. We just have to keep in mind syntax conflicts. 
+- https://youtrack.jetbrains.com/issue/KT-13626/Guard-conditions-in-when-with-subject
+  - Simple `if` with the following expression.
+  - They state that they covers most of use-cases of pattern matching...
+- https://github.com/nekitivlev/CompoundExpressions/blob/main/CompoundExpressionsProposalFull.md
+  - No OO languages have something like let-in syntax.
+  - Idea of `scope {}` syntax may be wrong as it does not significantly differ from `run {}` syntax.
+    And it eats two lines...
+- https://github.com/BlaBlaHuman/kotlin-comprehensions/blob/main/list-comprehension.md
+  - Not useful for pattern-matching. 
+
 
