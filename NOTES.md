@@ -623,4 +623,69 @@ Agenda:
 ### Meeting
 
 - Marat will think if it is enough to have only tagged errors with typealiases as interfaces.
-- Marat think that inference in lambdas is good.
+- Marat thinks that inference in lambdas is good.
+
+## August 2 - 6
+
+No generics so far.
+
+### Types
+
+- New types: `Error` (supertype for all errors), `Value` (supertype for all common types)
+- New type constructor: `A | B` (error union)
+
+### Well-formattedness
+
+`A | B` is well-formed if:
+- `A` and `B` are well-formed
+- `B <: Error`
+- `B` does not contain 2 non-disjoint __flexible__ variables
+- Constants in `B` are disjoint
+
+### Operations
+
+- `T|_v`
+  - `T <: Value` => `T|_v = T`
+  - `T <: Error` => `T|_v = Nothing`
+  - `T = A | B` => `T|_v = A|_v`
+- `T|_e`
+  - `T <: Value` => `T|_e = Nothing`
+  - `T <: Error` => `T|_e = T`
+  - `T = A | B` => `T|_e = A|_e | B`
+- For `T <: Error`: `[T]` -- interpret `T` as a set of classifiers
+
+### Subtyping
+
+New axioms:
+- `Any :> Error`
+- `Error :> MyError` for all `MyError`
+- `MyError :> Nothing`
+- `Any :> Value`
+- `A :> B | C <= A :> B & A :> C`
+- `A | B :> C <= A|_v :> C|_v & [A|_e | B] \subset [C|_e]`
+
+### Inference
+
+First idea is that we replace any flexible variable that is not subtype of `Value` or subtype of `Error` with two variables: `T|_v` and `T|_e`.
+
+Then we have to figure out how to solve constraints on error variables where they are interpreted as sets. 
+Actually, we have a list of constraints on sets with kinds:
+- `A \subset B`, where `A` and `B` are predefined sets or variables
+- `A \union B \subset C`, where 
+  - `A` and `C` are predefined sets or variables
+  - `B` is a predefined set
+
+Simple algorithm:
+- Start with empty sets for all variables
+- Fix all constraints that are not satisfied by adding (minimal amount of) elements into sets
+
+Have complexity around `O(T * log(T) * C)`, where
+- `T` is a number of elements in all sets
+- `C` is a number of constraints 
+
+Such approaches usually lead to complex error messages.
+Possible solutions:
+- As we incorporate constraints one by one, we know the first one that is not satisfied => we may provide a message for it
+- If we drop all upper-bounding constraints, 
+  we will infer the smallest possible sets satisfying all lower-bounding constraints.
+  Then we may just check if the resulting type a subtype of the expected type and provide a message if not.
