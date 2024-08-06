@@ -625,8 +625,28 @@ Agenda:
 - Marat will think if it is enough to have only tagged errors with typealiases as interfaces.
 - Marat thinks that inference in lambdas is good.
 
-## August 2 - 6
+## August 2 - 5
 
+Firstly, let's state that disjointness is not good in our case.
+This is because even in the case of `last` function:
+
+```kotlin
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+  var last: T | NotFound = NotFound
+  for (element in this) {
+    if (predicate(element)) {
+      last = element
+    }
+  }
+  if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+  return last // smart-cast to T
+}
+```
+
+`NotFound` is not disjoint with `T`.
+So we have to allow some cases of non-disjointness.
+
+So, let's start with the formalization.
 No generics so far.
 
 ### Types
@@ -689,3 +709,85 @@ Possible solutions:
 - If we drop all upper-bounding constraints, 
   we will infer the smallest possible sets satisfying all lower-bounding constraints.
   Then we may just check if the resulting type a subtype of the expected type and provide a message if not.
+
+## August 6
+
+Let's add generics.
+
+### Types
+
+Nothing new
+
+### Well-formattedness
+
+Nothing new
+
+### Operations
+
+- For `T <: Error`: `[T]` -- interpret `T` as a mapping from classifiers to type parameters
+
+### Subtyping
+
+Changed only the last one:
+- `A | B :> C <= A|_v :> C|_v & [A|_e | B] \subsumes [C|_e]`
+
+### Inference
+
+We have to figure out how to solve constraints on error variables where they are interpreted as maps instead of sets. 
+
+In our simple algorithm, we are adding classifiers to variables one by one.
+After we have added a new classifier, we initialize mapping to type parameters with the fresh variables.
+Then we add constraints on type parameters for this classifier from this `\subsumes` constraint.
+
+If it is not ambiguous, everything is finished.
+
+When could it be ambiguous?
+If we try to do it in such a constraint: `{MyErr -> Int} | A={MyErr -> B} \subsumes C={MyErr -> D}`
+Example of code to produce this: 
+
+```kotlin
+fun <T, E> foo(a: T | E | MyErr<Int>, b: T | E)
+
+val a: Int | Nothing
+val b: Int | MyErr<String>
+foo(a, b)
+```
+
+In this case, we have to generate constraint depending on variance:
+- If `MyErr` is invariant: `D = Int | B`. Additionally, `B = Int`. No problem there.
+- If `MyErr` is covariant: `D <: Int | B`. Which is ambiguous.
+- If `MyErr` is contravariant: `Int | B <: D`. Equivalent to `D :> Int & D :> B`. No problem there.
+
+As ambiguous constraints are not possible from another side, the only problem is covariant `MyErr`.
+
+Options to resolve this issue:
+- No generics in errors (overkill as there are no problems with invariant)
+- No (co)variance in errors
+- Fix mapping to type parameters if we have an explicit type.
+  - Strictly.
+    
+    If there is a constraint `{MyErr -> Int} | A={MyErr -> B}` (which originates to the same type) we may fix `B` to `Int` and constraint on type parameters will be unambiguous.
+    
+    For our example it will lead to error for argument `b`: `MyErr<Int> expected, but MyErr<String> found`.
+    Despite the variance.
+  - Softly.
+
+    We may state that `B` is a subtype/supertype of `Int`.
+    - In case of supertype we result in a constraints `Int <: B` and `D <: B`.
+      And in our example `E` will be inferred as `MyErr<Serializable & Comparable<*>>`.
+    - In case of subtype we result in a constraints `B <: Int` and `B <: Int`.
+      And in our example `E` will be failed to infer.
+
+The other problem is that if we treat `B` as a supertype of `Int` in case of covariant `MyErr`, 
+we may infer `E` to `MyErr<Serializable & Comparable<*>>`.
+In this case, when we match `a` inside the function, we, unexpectedly, do not result in a `MyErr<Int>`.
+So the only option is to treat `B` as a subtype of `Int`.
+
+In case of contravariant `MyErr`, based on the same problem we have to fix `B` to be a supertype of `Int`.
+So the constraint reduced from `D :> Int | B` is `D :> B` and `B :> Int`.
+
+Summarizing, we have several options for handling generics:
+- No generics
+- Invariant generics fixed to explicitly written
+- Generics strictly fixed to explicitly written
+- Generics softly fixed to explicitly written with respect to variance
