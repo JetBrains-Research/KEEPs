@@ -746,7 +746,7 @@ If we try to do it in such a constraint: `{MyErr -> Int} | A={MyErr -> B} \subsu
 Example of code to produce this: 
 
 ```kotlin
-fun <T, E> foo(a: T | E | MyErr<Int>, b: T | E)
+fun <T : Value, E : Error> foo(a: T | E | MyErr<Int>, b: T | E)
 
 val a: Int | Nothing
 val b: Int | MyErr<String>
@@ -791,3 +791,7 @@ Summarizing, we have several options for handling generics:
 - Invariant generics fixed to explicitly written
 - Generics strictly fixed to explicitly written
 - Generics softly fixed to explicitly written with respect to variance
+
+## August 7
+
+- todo: Subtyping for local errors
