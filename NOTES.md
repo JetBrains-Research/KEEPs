@@ -114,3 +114,46 @@ Notes on sources from romanv:
   - `is Clazz(.fieldname is ...)` is just a pattern on a field 
   - or `is Clazz(_=fieldname is ...)`
 
+## 7 August
+
+Summarizing on the pattern-matching:
+- For data-classes.
+  There are two modes seme as for destructuring: Positional and Named.
+  - Positional.
+      
+    Choices:
+    - (var|val) for the binding or val by default.
+    - Possibility of nested patterns.
+    - Possibility of binding with nested destruction.
+        
+    Thoughts: 
+    - (var|val) is not required as writing a name is already an introduction.
+      Not requiring them will fully align the syntax with the destructuring.
+    - Nested patterns are looks weird but not much and extremely useful.
+    - Is it ok to have a binding with nested destruction?
+      `is Clazz(fieldName is Clazz2(fieldName2))`
+      The issue is that it potentially conflicts with the nested destruction, 
+      where the nested elements should be on the left (while there on the right).
+      
+    So actually the current idea is `bindingName? condition? | _`
+  - Named.
+      
+    Choices:
+    - (var|val) for the binding or val by default.
+    - Possibility of nested patterns.
+    - Differentiation between binding + pattern and just pattern.
+        
+    Thoughts:
+    - (var|val) is not required as writing a name is already an introduction.
+      Not requiring them will fully align the syntax with the destructuring.
+    - For named matching we have to differentiate between binding + pattern and pattern.
+      The idea is to use `.` or `_=` before the field name.
+    - In theory we may use `.` before name of the field to use an arbitrary val in the pattern.
+      It allows for pattern matching of the arbitrary class.
+- For common classes.
+  It may be allowed to just use any val using `.` before the field name.
+  Logically, it is just a simplified syntax for short conditions
+
+## 8 August
+
+What do we want from this document:
