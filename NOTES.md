@@ -156,4 +156,34 @@ Summarizing on the pattern-matching:
 
 ## 8 August
 
-What do we want from this document:
+Before meeting:
+
+- Destructuring is pattern-matching
+  - Write (type) in the same way everywhere (1. left-to-right) (2. same in pattern-matching)
+- Nested destructuring
+  - We have to consider it NOW
+  - And it have to be the same
+- Left-to-right
+    - `val a, b = v~>(fn~>(a, b))`
+    - `val a, b = v das (fn das (a, b))`
+    - pattern-matching
+        - `is C(.fn is D(a, b))`
+        - `is C(.fn das (a, b))`
+          or
+          `is C(.fn~>(a, b))`
+          but not:
+          `is C((a, b)=.fn)`
+- Special syntax to say that I've matched all fields.
+  Report errors otherwise.
+  F.e. hashes.
+- Do not use `()` in `val (a, b) = v das (fn das (a, b))`
+    - No semantics on the rhs of assignment
+    - No conflict with current syntax
+- Don't you want to introduce val and var in a single line?
+  - `let` is `val` by default and `var` with `~`
+    `let a, ~b = v das ((a,b)=fn)`
+- Don't you want to return tuples in language?
+  - `Tuple` is structured data-class
+  - Free two return values (allocation on the stack on the call-site)
+  - Deforestation of tuple in fold
+  - Aka special class which compiler highly optimizes.
