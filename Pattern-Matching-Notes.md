@@ -35,7 +35,6 @@
 ## Grammar
 
 $$
-\footnotesize
 \begin{array}{lll}
 \langle\text{when branch condition} \rangle  & \Coloneqq & (P\ |\ \text{\color{red}in}\ \dots \ |\ \dots)\ (\text{\color{red}if}\ \langle \text{guards} \rangle)? & \\
 P &\Coloneqq &Is\ |\ Dis \\
