@@ -4,6 +4,7 @@
 
 1. Use the same very syntax for all destructurings, including pattern-matching
 2. Some other things to think about before making the final decision on destructurings and pattern-matching design
+3. We do not suggest any "final design"; it should be considered more as an example to show certain ideas and concerns
 
 
 ## Questions
