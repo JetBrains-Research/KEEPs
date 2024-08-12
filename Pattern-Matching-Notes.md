@@ -102,6 +102,8 @@ or
 </br>
 ```let a, c, b = v dis (a, var b, c)``` // Crap
 
+Syntax `(val x, var y) = Point(x,y)` we find violating usual way declarations are done in Kotlin and has a very limited use-case. 
+
 ## Tuples
 
 1. RETURN TUPLES BACK!!!!
