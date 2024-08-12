@@ -659,7 +659,12 @@ No generics so far.
 `A | B` is well-formed if:
 - `A` and `B` are well-formed
 - `B <: Error`
-- `B` does not contain 2 non-disjoint __flexible__ variables
+- `B` does not contain 2 non-disjoint variables
+  > It means that errors may have forms:
+  > - List of explicitly written error constants (further denoted as `Errs`)
+  > - `E | Errs`, where E is unbounded error variable
+  > - `E1 | E2 | E3 | Errs`, where `E1` and `E2` and `E3` are disjoint error variables.
+  >   F.e. DbErrors, NetworkErrors, and CacheErrors
 - Constants in `B` are disjoint
 
 ### Operations
@@ -792,6 +797,11 @@ Summarizing, we have several options for handling generics:
 - Generics strictly fixed to explicitly written
 - Generics softly fixed to explicitly written with respect to variance
 
-## August 7
+## August 12
 
-- todo: Subtyping for local errors
+Addition of local errors (`NotFound@last`) to this system is quite simple and orthogonal.
+Local errors just is not a subtype of `Any` and a supertype of `Nothing`.
+Thus, they could not be added to any variable and have to be stated only as a constant.
+
+Any approach to add a subtyping for them will lead to severe complications.
+F.e. we could introduce something like `Errors@last` which will be a supertype of all errors and local errors for `last` function (or class).
