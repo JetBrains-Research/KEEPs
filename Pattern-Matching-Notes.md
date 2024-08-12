@@ -102,6 +102,8 @@ or
 </br>
 ```let a, c, b = v dis (a, var b, c)``` // Crap
 
+And once again: Danya prefers ```let v dis (a = x, var b, c)``` if one do not want to repeat names.
+
 Syntax `(val x, var y) = Point(x,y)` we find violating usual way declarations are done in Kotlin and has a very limited use-case. 
 
 ## Tuples
@@ -139,5 +141,8 @@ Maybe discussed later after making decision on final design, if any, of compound
   ```
 
 ## Connection to (compound-) expressions
+
+As stated earlier, we may consider $Dis$ to return a list of names to be added to the context.
+This is exactly one case of compound expressions.
 
 See another KEEP (not ready yet).
