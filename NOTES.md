@@ -187,3 +187,50 @@ Before meeting:
   - Free two return values (allocation on the stack on the call-site)
   - Deforestation of tuple in fold
   - Aka special class which compiler highly optimizes.
+
+## 13 August
+
+- Conjunction and Disjunction patterns
+  - Go to hell.
+    It is rarely useful, hard to understand, implement and may lead to high complexity.
+- Negation pattern
+  - `!is` ***may*** be allowed (but no nesting inside)
+    - `a !is Pair(a, b)` sounds extremely strange.
+    - `a !is Pair` is ok as a down-most condition.
+    - But we may disallow them as well as `!=` 
+      because we would like to limit a pattern to actions required for destructuring.
+      Use: `is Pair(a, b) if a !is Box` instead of `is Pair(a !is Box, b)`. 
+- Compound patterns
+  - Allowed as it is really looks useful
+  - Have exactly the same syntax as in the pattern matching.
+  - Works both in guards and `if` expressions.
+    - We may prohibit them in `if` expressions if we consider this as a bad practice.
+  - Examples:
+    ```kotlin
+    when (scr) {
+      is Pair(a, b)
+        if a is Box(va) && b is Box(vb) -> {
+      }
+    }
+    ```
+    ```kotlin
+    when (scr) {
+      is Pair(a, b)
+        if a is Box || (b is Box(vb) && vb == 0) -> {
+      }
+    }
+    ```
+    ```kotlin
+    when (scr) {
+      is Pair(a, b)
+        if a is Box(v) || b is Box(v) -> {
+      }
+    }
+    ```
+  - Approaches:
+    - Allow only first example. Easy to understand, no conflicts, good.
+    - Allow second example too. Harder to track scope, but still easy to type and understand.
+    - We should not allow the third example without an explicit request from users. 
+      This could be added later if it is really required.
+    
+    We recommend the first approach as it looks overly enough and easy to understand.
