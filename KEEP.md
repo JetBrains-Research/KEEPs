@@ -13,15 +13,16 @@
 ### Issue categories
 
 1. Internal errors.
-   It is a case where we would like to have a special error type that is supposed not to be able to be accessible outside the function.
-   Not only as a type (aka local classes), but also as a value (aka we do not expect to have this value in the input of the function or anywhere else). 
-   This case may be viewed another special state  
-   Firstly, it is demonstrated by the `last` function.
-   Secondly, it may be used 
+   In this case we would like to have a special error state that is local to the current function/class(/package?)
+   Example of such function is `last` function, class is `HashMap`.
+   This states is expected to express some internal states and does not be exposed outside of the scope.
+   Not as types but as values as well.
+   So this function/class is able to rely on the fact that this error will not be in the input parameters or anywhere else.
 2. External errors.
-   Exceptional states that could happen in the function.
-   Remove wrappers to express failable operations.
-   Unify different versions of functions in stdlib (`OrNull` vs `OrThrow`).
+   In this case we would like to express exceptional states that could happen in the function/class.
+   The example of this use-case are functions in stdlib with several overloads (`OrNull` vs `OrThrow`).
+   The desired output of this feature is to unify them in a single function which could be easily handled in both manner.
+   More precisely, it has to be easily transformed into exception and easily posphoned to handle using language features like conditional call and elvis operator.
 
 ### Background
 
@@ -35,27 +36,25 @@ Effects
 
 ### Goals
 
-1. Cover all mentioned use-cases.
-2. Make operating with errors as easy as possible.
+1. Cover both mentioned use-cases.
+2. Mainimize boilerplate required to operate with errors to the same level as with nulls.
 3. Minimal performance overhead.
+   Desirably to have an errors without data with the performance comparable to `null`.
 
 ## Proposal
 
 ### Approach
 
-We had a preliminary discussion about a design where errors is a separate hierarch with the same features as an existing classes.
+We had a preliminary discussion about a design where errors have a separate hierarch with the same features as an existing classes.
 This approach is directed by a goal "Let's add as many features as possible to remain errors inferrable".
-But it leads to several complex cases and does not have a clear use-cases in a real-world code.
+But this approach have several significant issues.
 
-Additionally, it is hard to cover even the simplest use-case with `last` function as in any such system we will encounter issue that the same error could be passed back to this function (upcasted to the errors supertype).
-So this class of use-cases have to be solved using some ad-hoc approach.
+The first problem of this full-flavored approach is performance-based.
+All functions that would like to have a specific internal state, creates a new private class.
+If they are mapped to a separate JVM classes, it leads to significant amount of small classes in JVM and class-loader calls.
+This performance issue is similar to one encountered in the JVM at the moment of lambda's introduction.
 
-The other problem of this full-flavored approach is that it will lead to a huge number of small local classes, that will be declared in every function.
-If they are mapped to a separate JVM classes, it will lead to the same issue encountered in the JVM at the moment of lambda's introduction.
-
-Thus, we moved into approach where we try to make as few features as possible that will cover all known use-cases.
-
-#### Problem with disjointness
+The other and more significant problem with full-fledged approach is not easily supported by the type inference.
 
 When unions are discussed in terms of Kotlin's future, they are required to be disjoint.
 But in the case of errors, it is not possible.
@@ -72,6 +71,8 @@ So we would like to allow some kind of non-disjointness for error unions.
 To achieve this, we are prohibiting subtyping between errors.
 As otherwise, it will lead to the exponential type inference. 
 (TODO: check this)
+
+Thus, we moved into approach where we try to make as few features as possible that will cover all known use-cases.
 
 ### Design overview
 
