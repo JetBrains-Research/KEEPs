@@ -14,15 +14,16 @@
 
 1. Internal errors.
    In this case we would like to have a special error state that is local to the current function/class(/package?)
-   Example of such function is `last` function, class is `HashMap`.
-   This states is expected to express some internal states and does not be exposed outside of the scope.
+   Example of such a function is `last` function, class is `HashMap`.
+   These states are expected to express some internal states and do not be exposed outside the scope.
    Not as types but as values as well.
    So this function/class is able to rely on the fact that this error will not be in the input parameters or anywhere else.
 2. External errors.
-   In this case we would like to express exceptional states that could happen in the function/class.
+   In this case, we would like to express exceptional states that could happen in the function/class.
    The example of this use-case are functions in stdlib with several overloads (`OrNull` vs `OrThrow`).
-   The desired output of this feature is to unify them in a single function which could be easily handled in both manner.
-   More precisely, it has to be easily transformed into exception and easily posphoned to handle using language features like conditional call and elvis operator.
+   The desired output of this feature is to unify them in a single function which could be easily handled in both manners.
+   More precisely, it has to be easily transformed into exception 
+   and easily postponed to handle using language features like conditional call and elvis operator.
 
 ### Background
 
@@ -37,9 +38,9 @@ Effects
 ### Goals
 
 1. Cover both mentioned use-cases.
-2. Mainimize boilerplate required to operate with errors to the same level as with nulls.
+2. Minimize boilerplate required to operate with errors to the same level as with nulls.
 3. Minimal performance overhead.
-   Desirably to have an errors without data with the performance comparable to `null`.
+   Preferably to have an errors without data with the performance comparable to `null`.
 
 ## Proposal
 
@@ -47,14 +48,16 @@ Effects
 
 We had a preliminary discussion about a design where errors have a separate hierarch with the same features as an existing classes.
 This approach is directed by a goal "Let's add as many features as possible to remain errors inferrable".
-But this approach have several significant issues.
+But this approach has several significant issues.
 
 The first problem of this full-flavored approach is performance-based.
-All functions that would like to have a specific internal state, creates a new private class.
-If they are mapped to a separate JVM classes, it leads to significant amount of small classes in JVM and class-loader calls.
+All functions that would like to have a specific internal state create a new private class.
+If they are mapped to separate JVM classes, 
+it leads to a significant number of small classes in JVM and class-loader calls.
 This performance issue is similar to one encountered in the JVM at the moment of lambda's introduction.
 
-The other and more significant problem with full-fledged approach is not easily supported by the type inference.
+The other and more significant problem with full-fledged approach is
+that it is not easily supported by the type inference.
 
 When unions are discussed in terms of Kotlin's future, they are required to be disjoint.
 But in the case of errors, it is not possible.
@@ -146,8 +149,10 @@ fun foo(val content: String | ConnectionError | DbError): Int? | OtherError =
 
 #### Local error unions
 
-Local error type is an error defined to be local.
-There are several options to do this:
+Local error type is an error defined in a specific scope.
+They express some exceptional state of the function/class that exists only in internal logic. 
+They are expected not to leave it neither on the type level nor on the value level.
+There are several options to declare them:
 1. If we would like to have required error declaration:
    - ```kotlin
      fun last() {
@@ -166,20 +171,25 @@ There are several options to do this:
        val last: T | `NotFound@last = `NotFound@last 
     }
    ```
-   
-From these types we would like to have a guarantee that they do not leak outside the scope.
-Not just that their type is not exposed, but also that their value is not leaked.
-If we would like to control this on the type-level:
+
+It is straightforward to control their scope on the type level as it is the same as for the common local classes.
+
+To track scope on the value level is something new to the language.
+Thus, we have to introduce some new technique for this.
+Possible options:
 1. Local errors are not subtypes neither of `Error` nor of `Any`.
    It may complicate the type system and writing code with such errors.
-2. We may introduce something like `Error@last` which is a supertype of `Error` which includes all errors local to class of `last` and `last` itself.
-    
-So all of these approaches lead to significant complication of the type system.
-Thus, we may just not check anything and leave it on the developer's responsibility to track the correct usage of local errors.
-
-In this case local errors will be used in the same way. 
-`NotFound` from different scopes will be different types.
-Thus, the correct implementation of the `last` function will be possible, but just not guaranteed.
+   But any value that may have this error is required to explicitly declare it.
+   Thus, it is the same to control the scope on the value level as for the type level.
+2. We may introduce something like `Error@last` which is a supertype of `Error` 
+   and includes all errors local to class of `last` and `last` function itself.
+   It is an extension of the previous approach and may allow to write more code more easily.
+   But it is quite a strange design and may be confusing for developers.
+3. Do not track value scope the type level at all.
+   In this case, we rely on the developer's responsibility to track the correct usage of local errors.
+   Additionally, we may implement IDE static analysis to help with it.
+   As `NotFound` from different scopes will be different types, 
+   the correct implementation of the `last` function will be possible, but just not guaranteed.
 
 #### Generics in errors
 
