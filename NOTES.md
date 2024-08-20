@@ -805,3 +805,83 @@ Thus, they could not be added to any variable and have to be stated only as a co
 
 Any approach to add a subtyping for them will lead to severe complications.
 F.e. we could introduce something like `Errors@last` which will be a supertype of all errors and local errors for `last` function (or class).
+
+## August 19
+
+Meeting:
+- Generics
+- Local errors
+- Declaration vs no-declaration of errors
+
+```kotlin
+T | NotFound
+
+T | NotFound<String>
+
+T {NotFound -> V}
+V <: String
+
+v : T | NotFound<String>
+
+fun <T> foo (v: T) {
+    val found: T | NotFound<S> = NotFound
+    //           ^ Error: Generic parameters incompatible in union
+}
+```
+
+```kotlin
+fun last(...): T {
+    // Error@last
+    local error NotFound
+    local error Blah
+    val last: T | NotFound | Blah = NotFound
+    last as T
+    // expands into:
+    when (val last = last) {
+        is NotFound -> throw IllegalStateException()
+        is Blah -> throw IllegalStateException()
+        else -> last
+    }
+    ...
+}
+
+T | E1
+
+Any
+Any@last :> NotFound
+
+private fun <T, E : Error@C> foo(v: T | E): T | E {
+}
+```
+
+```kotlin
+error NotFound
+
+const val package$NotFound = ...
+
+fun <T> last(...): T | NotFound {
+    val last: T | NotFound = NotFound
+    ...
+}
+
+// vs
+
+fun <T> last(...): T | `NotFound {
+    val last: T | `NotFound = `NotFound()
+    ...
+}
+```
+
+```kotlin
+error MyError(val code: Int, val message: Err2)
+
+fun foo (v: Int | MyError) {
+    when (v) {
+        is Int -> ...
+        is MyError ->  {
+            // v : MyError
+            v.message.code
+        }
+    }
+}
+```
