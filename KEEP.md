@@ -8,13 +8,120 @@
 
 ## Problem statement
 
-> Copy from the issue
+The problem addressed in this KEEP is the support on the language level for error handling 
+in a way similar to `Either` in several languages or `Result` that is already presented in Kotlin.
+The difference is that we would like to have a more lightweight, flexible solution with more language-level support.
+
+### Covered use-cases
+
+Let's review the main use-cases for such a feature.
+
+#### In-place tags
+
+A typical showcase of using in-place tags is `Sequence.last` function that is written as follows:
+
+```kotlin
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+    var last: T? = null
+    var found = false
+    for (element in this) {
+        if (predicate(element)) {
+            last = element
+            found = true
+        }
+    }
+    if (!found) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+    @Suppress("UNCHECKED_CAST")
+    return last as T
+}
+```
+
+The variable found is used specifically for cases when a predicate looks like `{ it == null }`. 
+It's a typical pattern for functions that retrieve data from containers (single/singleOrNull/last/...).
+
+One way to rewrite the code without using the variable `found` is to use some kind of private tag:
+
+```kotlin
+object NotFound
+
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+var last: Any? = NotFound // We have to use the most common type Any?
+for (element in this) {
+if (predicate(element)) {
+last = element
+}
+}
+if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+@Suppress("UNCHECKED_CAST")
+return last as T // unchecked cast
+}
+```
+
+It might be a bit shorter, but we still have to trick our type system by using the most common type `Any?` 
+and performing an unchecked cast at the end.
+
+#### Unions as tags
+
+Combining the ideas of tags and unions, the mentioned code could be rewritten as follows:
+
+```kotlin
+error object NotFound // new category of types
+
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+var last: T | NotFound = NotFound
+for (element in this) {
+if (predicate(element)) {
+last = element
+}
+}
+if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+return last // smart-cast to T
+}
+```
+
+Our functions work for all `T` and it doesn't have unchecked casts
+
+The other issue with this approach is the same as with null: input sequence may contain `NotFound` itself.
+To avoid this we may declare `NotFound` inside the `last` function and does not expose it outside.
+And it would be great if the type system could guarantee that this error will not be exposed outside the function.
+
+#### ...OrThrow / ...OrNull
+
+It's quite common to encounter functions that describe part of their effects for error cases in their names. 
+This pattern could be enhanced by having only one function with a functional name like get or processRequest, 
+where exceptional cases are encoded in the signature.
+
+A typical example could be our functions `maxOf` 
+([code](https://github.com/JetBrains/kotlin/blob/0938b46726b9c6938df309098316ce741815bb55/libraries/stdlib/common/src/generated/_Arrays.kt#L14700)) 
+where many functions are duplicated to have `maxOfOrNull` counterpart in case of empty collections.
+
+#### Moving unions to return types
+
+With the error union types, it could be possible to define one method that can encode all the necessary error cases:
+
+```kotlin
+// getOrThrow -> get
+fun <T> get(): T | Error
+
+// maxOrNull -> max
+fun IntArray.max(): Int | NoSuchElement
+
+// awaitSingleOrNull -> awaitSingle
+fun <T> awaitSingle(): T | NoSuchElement
+```
+
+However, to make the pattern shine in Kotlin, 
+it is essential to provide deconstruction operators for such unions at call-sites.
+
+This is where our presentation of unions as 'main' or 'extras' also works well
+We can consider operators `??.` (to compound errors on the left side) 
+and `??:` (elvis analogue, to evaluate RHS if there is an error)
 
 ### Issue categories
 
 1. Internal errors.
    In this case we would like to have a special error state that is local to the current function/class(/package?)
-   Example of such a function is `last` function, class is `HashMap`.
+   Example of such a function is `last`.
    These states are expected to express some internal states and do not be exposed outside the scope.
    Not as types but as values as well.
    So this function/class is able to rely on the fact that this error will not be in the input parameters or anywhere else.
@@ -26,6 +133,8 @@
    and easily postponed to handle using language features like conditional call and elvis operator.
 
 ### Background
+
+TODO: Add information about similar features in other languages.
 
 Zig
 
@@ -224,6 +333,19 @@ fun foo() {
 > Due to another kind of errors it is possible to allow call `.code` 
 > if we have union of errors where each error have `code` field.
 > But it requires additional investigation.
+
+To allow easily transform `errors` into exceptions or null, we may introduce a new functions:
+    
+```kotlin
+fun <T> (T | Error).orThrow() {
+    contract { returns() implies (this@orThrow !is Error) }
+    // ...
+}
+
+fun <T> (T | Error).orNull(): T? {
+    // ...
+}
+```
 
 #### Local error unions
 
