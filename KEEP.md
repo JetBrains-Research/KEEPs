@@ -69,13 +69,65 @@ Resulting function is expected to be the following:
 fun <T> Iterable<T>.find(f: (T) -> Boolean): T | NotFound
 ```
 
-But it is not allowed as `T` and `NotFound` are not disjoint.
+But it is not disjoint as `T` may contain `NotFound` itself.
 So we would like to allow some kind of non-disjointness for error unions.
-To achieve this, we are prohibiting subtyping between errors.
-As otherwise, it will lead to the exponential type inference. 
-(TODO: check this)
+To achieve this, we have to use a slightly different approach compared to one used for the whole language.
 
 Thus, we moved into approach where we try to make as few features as possible that will cover all known use-cases.
+
+With this approach, we do not allow for error types:
+- Generics.
+
+  Generics provide the main issue with unions in Kotlin.
+  While for disjoint unions it is possible to do something,
+  in a non-disjoint approach we easily encounter the following issue:
+  ```kotlin
+  fun <T> foo(v: T) {
+    val a: T | MyError<String> = v
+    // ...
+    if (a is MyError) {
+      a // Expected: MyError<String>, Actual: MyError<*>
+    }
+  }
+  ```
+  In this code we may expect that if `a` is `MyError`, then it is `MyError<String>`.
+  The issue is that we do not know anything about generic parameters of `MyError` in `T`.
+  Possible solutions to this issue are:
+  - Consider this behavior as ok.
+    But it is really confusing if generic parameters become use-less in unexpected case.
+  - Prohibit union of type variable and error with generic parameters.
+    But we allow such a union in case of no generic parameters.
+    Quite a confusing behavior.
+  - Do not allow generics for errors.
+    This approach is the chosen one. 
+    Advantages:
+    - It will not generate anything confusing.
+    - There are no clear use-cases where generics are significant for errors.
+    - There is an opinion that they will generate more issues in type inference which we could not establish so far.
+- Subtyping.
+
+  Actually, it is possible to add subtyping for errors.
+  But there are several cons against this option:
+  - There are no clear use-cases where subtyping is significant and could not be replaced with typealias.
+    More precisely:
+    ```kotlin
+    abstract error DbError
+    error DbConnectionCancelled : DbError
+    error DbTokenExpired : DbError
+    // replace with:
+    error DbConnectionCancelled
+    error DbTokenExpired
+    typealias DbError = DbTokenExpired | DbConnectionCancelled
+    ```
+  - Subtyping forces us to use 1to1 mapping from errors to JVM classes which have mentioned performance issues
+  - Type inference for errors will never infer a supertype.
+    Instead, it will just list all possible actual errors.
+    So supertype is only for explicit annotations.
+  - We do not want users to abuse this feature.
+    And in terms of errors, the actual value of a supertype is just a list of subtypes.
+    Any abstract method is a sign of abuse.
+    So typealias is even more semantically sound for errors.
+    In an extra cases where it is required, typealias + extension function is all you need.
 
 ### Design overview
 
@@ -94,6 +146,11 @@ error MyError(val code: Int)
 > // or
 > fun foo(): Int | `MyError(Int)
 > ```
+>
+> But this approach looks worse than the proposed one.
+> - Firstly, it does not align with the existing Kotlin style
+> - Secondly, it does not allow making declaration-site optimizations
+> - Finally, it allows clashing errors from different libraries. Which is not expected in 99% of cases.
 
 Error type may not have any supertypes (use delegation instead)
 other than new common supertype for all of them, `Error`.
@@ -123,7 +180,7 @@ Limitations on those types:
       arg3: V | EDB | EP, // allowed
       arg4: V | E1 | MyError, // allowed
       arg5: String | E1 | E2, // not allowed as E1 and E2 are not disjoint
-      arg6: T | E1, // not allowed as T and E1 are not disjoint
+      arg6: T | E1, // not allowed as error component of T and E1 are not disjoint
    )
    ```
 
@@ -136,7 +193,7 @@ val b = a ??: 0
 val c = a??.toString()
 ```
 
-To destruct error union, common `when` expression may be used:
+To destruct error union, common `when` expression may be utilized:
 
 ```kotlin
 fun foo(val content: String | ConnectionError | DbError): Int? | OtherError =
@@ -147,84 +204,110 @@ fun foo(val content: String | ConnectionError | DbError): Int? | OtherError =
     }
 ```
 
+To get a value from the error, you have to
+- (smart-)cast it to specific error
+- Then it is possible to use classic field reference or destructuring syntax as for common data classes:
+
+```kotlin
+error NetworkError(val code: Int, val message: String)
+
+fun foo() {
+    val v: Json | NetworkError = request()
+    if (v is NetworkError) {
+        val (code, message) = v
+        // or
+        val code = v.code
+    }
+}
+```
+
+> Due to another kind of errors it is possible to allow call `.code` 
+> if we have union of errors where each error have `code` field.
+> But it requires additional investigation.
+
 #### Local error unions
 
 Local error type is an error defined in a specific scope.
 They express some exceptional state of the function/class that exists only in internal logic. 
 They are expected not to leave it neither on the type level nor on the value level.
-There are several options to declare them:
-1. If we would like to have required error declaration:
-   - ```kotlin
-     fun last() {
-         error NotFound
-     }
-     ```
-     or
-     ```kotlin
-     class C {
-         private error NotFound
-     }
-     ```
-2. If we would like to have an optional error declaration:
-   ```kotlin
-    fun <T> last() {
-       val last: T | `NotFound@last = `NotFound@last 
-    }
-   ```
+They are declared in the same way as global errors but with visibility modifiers.
+
+```kotlin
+fun last() {
+   error NotFound
+}
+
+class C {
+   private error NotFound
+}
+```
 
 It is straightforward to control their scope on the type level as it is the same as for the common local classes.
 
-To track scope on the value level is something new to the language.
-Thus, we have to introduce some new technique for this.
-Possible options:
-1. Local errors are not subtypes neither of `Error` nor of `Any`.
-   It may complicate the type system and writing code with such errors.
-   But any value that may have this error is required to explicitly declare it.
-   Thus, it is the same to control the scope on the value level as for the type level.
-2. We may introduce something like `Error@last` which is a supertype of `Error` 
-   and includes all errors local to class of `last` and `last` function itself.
-   It is an extension of the previous approach and may allow to write more code more easily.
-   But it is quite a strange design and may be confusing for developers.
-3. Do not track value scope the type level at all.
-   In this case, we rely on the developer's responsibility to track the correct usage of local errors.
-   Additionally, we may implement IDE static analysis to help with it.
-   As `NotFound` from different scopes will be different types, 
-   the correct implementation of the `last` function will be possible, but just not guaranteed.
+To track their scope on the value level, we declare them as not subtypes neither of `Error` nor of `Any`.
+But we leave them as a supertype of `Nothing`. 
+(TODO: check if it is safe)
+Because of this, for every value that may contain this error, it has to be directly expressed in the type.
+Thus, if a type is not exposed out of the declared scope, the value is not exposed either.
 
-#### Generics in errors
+The issue with this approach is that we are not able to pass value with this error in any function.
+Even if we would like to have a private function expected to accept such value as an argument, 
+we have to specify it explicitly.
+And if we would like for this function to optionally accept this error, we have to write such a boilerplate:
+```kotlin
+private error MyError
 
-We may allow not only just content in th error, but also some generic parameters.
-It leads to several complications in the type inference, but does not break it.
+private fun <T, LOCE : MyError> foo(v : T | LOCE): T | LOCE
+```
+As a result, any value with such errors has significantly limited usability.
 
-Any union of errors may not have two errors with the same classifier and different generic parameters.
-Their generic parameters will be unified respected to variance.
+The main use-case of local errors is `last` function.
+It is possible to implement it using a common errors.
+If we just limit the scope of the error on the type-level (common private error) 
+and developer will track that this error is not exposed outside the function.
+But with local errors, it is possible to guarantee the correctness of non-exposure on the type level.
+
+> Because of such limitedness of their applicability we may introduce another modifier (`local`) for local errors and use `private` modifier in a same way as for classes.
+> Or just do not have such a feature and leave everything on the programmer.
+
+> To expand the applicability of this feature, 
+> we may introduce a common supertype for all errors plus all errors local to the current scope.
+> F.e. `Error@last` which is a supertype of `Error` and errors local to class of `last` and `last` function itself.
 
 ### Runtime representation
 
-Despite the option to use errors (predeclared or without declaration) errors could be expressed with a single class:
+All errors could be expressed (internally) with a single class:
 
 ```kotlin
 class Error(val classifier: String, val content: Any?)
+// or
+class Error<T>(val classifier: String, val content: T)
 ```
 
-- Where classifier is not just a name of the error, but also a scope which it is bind to.
-  And any checks for errors could be done using just string equality.
+- Classifier is not just a name of the error, but also a scope where it is declared.
+  Any checks for errors could be performed using just string equality.
   And these strings even could be transformed into `.intern()` to reduce it to reference equality.
 - Content is null for errors without data.
-  How to store data that it will not lead to complication if the data is changed?
+- If there is some data, there are several options to store them.
+  - If there is one field, we may store it directly.
+  - If there are several fields, we may declare backed data class or store them in the array
 
-The overhead of boxing could be even removed for the errors without data. 
+  These options have to be discussed in the context of binary compatibility and performance.
+
+With this approach and declaration of the error could be transformed into:
+- For errors without data: just a val with the only instance of this error.
+  This allows operating with this error as with `null`, because we are able to use reference equality.
+  This case is actually transformed into "Another special value for reference with the performance comparable to null."
+- For errors with data: constructing function or nothing if we would like to construct them in-place.
 
 ### Inference
 
-#### Without generics
-
-##### Types
+#### Types
 
 - New types: `Error` (supertype for all errors), `Value` (supertype for all common types)
 - New type constructor: `A | B` (error union)
 
-##### Well-formattedness
+#### Well-formattedness
 
 `A | B` is well-formed if:
 - `A` and `B` are well-formed
@@ -232,12 +315,12 @@ The overhead of boxing could be even removed for the errors without data.
 - `B` does not contain 2 non-disjoint variables
   > It means that errors may have forms:
   > - List of explicitly written error constants (further denoted as `Errs`)
-  > - `E | Errs`, where E is unbounded error variable
+  > - `E | Errs`, where E is an unbounded error variable
   > - `E1 | E2 | E3 | Errs`, where `E1` and `E2` and `E3` are disjoint error variables.
       >   F.e. DbErrors, NetworkErrors, and CacheErrors
 - Constants in `B` are disjoint
 
-##### Operations
+#### Operations
 
 - `T|_v`
     - `T <: Value` => `T|_v = T`
@@ -249,7 +332,7 @@ The overhead of boxing could be even removed for the errors without data.
     - `T = A | B` => `T|_e = A|_e | B`
 - For `T <: Error`: `[T]` -- interpret `T` as a set of classifiers
 
-##### Subtyping
+#### Subtyping
 
 New axioms:
 - `Any :> Error`
@@ -259,7 +342,7 @@ New axioms:
 - `A :> B | C <= A :> B & A :> C`
 - `A | B :> C <= A|_v :> C|_v & [A|_e | B] \subset [C|_e]`
 
-##### Inference
+#### Inference
 
 First idea is that we replace any flexible variable that is not subtype of `Value` or subtype of `Error` with two variables: `T|_v` and `T|_e`.
 
@@ -283,93 +366,13 @@ Possible solutions:
 - As we incorporate constraints one by one, we know the first one that is not satisfied => we may provide a message for it
 - If we drop all upper-bounding constraints,
   we will infer the smallest possible sets satisfying all lower-bounding constraints.
-  Then we may just check if the resulting type a subtype of the expected type and provide a message if not.
-
-#### With generics
-
-##### Types
-
-Nothing new
-
-##### Well-formattedness
-
-Nothing new
-
-##### Operations
-
-- For `T <: Error`: `[T]` -- interpret `T` as a mapping from classifiers to type parameters
-
-##### Subtyping
-
-Changed only the last one:
-- `A | B :> C <= A|_v :> C|_v & [A|_e | B] \subsumes [C|_e]`
-
-##### Inference
-
-We have to figure out how to solve constraints on error variables where they are interpreted as maps instead of sets.
-
-In our simple algorithm, we are adding classifiers to variables one by one.
-After we have added a new classifier, we initialize mapping to type parameters with the fresh variables.
-Then we add constraints on type parameters for this classifier from this `\subsumes` constraint.
-
-If it is not ambiguous, everything is finished.
-
-When could it be ambiguous?
-If we try to do it in such a constraint: `{MyErr -> Int} | A={MyErr -> B} \subsumes C={MyErr -> D}`
-Example of code to produce this:
-
-```kotlin
-fun <T : Value, E : Error> foo(a: T | E | MyErr<Int>, b: T | E)
-
-val a: Int | Nothing
-val b: Int | MyErr<String>
-foo(a, b)
-```
-
-In this case, we have to generate constraint depending on variance:
-- If `MyErr` is invariant: `D = Int | B`. Additionally, `B = Int`. No problem there.
-- If `MyErr` is covariant: `D <: Int | B`. Which is ambiguous.
-- If `MyErr` is contravariant: `Int | B <: D`. Equivalent to `D :> Int & D :> B`. No problem there.
-
-As ambiguous constraints are not possible from another side, the only problem is covariant `MyErr`.
-
-Options to resolve this issue:
-- No generics in errors (overkill as there are no problems with invariant)
-- No (co)variance in errors
-- Fix mapping to type parameters if we have an explicit type.
-    - Strictly.
-
-      If there is a constraint `{MyErr -> Int} | A={MyErr -> B}` (which originates to the same type) we may fix `B` to `Int` and constraint on type parameters will be unambiguous.
-
-      For our example it will lead to error for argument `b`: `MyErr<Int> expected, but MyErr<String> found`.
-      Despite the variance.
-    - Softly.
-
-      We may state that `B` is a subtype/supertype of `Int`.
-        - In case of supertype we result in a constraints `Int <: B` and `D <: B`.
-          And in our example `E` will be inferred as `MyErr<Serializable & Comparable<*>>`.
-        - In case of subtype we result in a constraints `B <: Int` and `B <: Int`.
-          And in our example `E` will be failed to infer.
-
-The other problem is that if we treat `B` as a supertype of `Int` in case of covariant `MyErr`,
-we may infer `E` to `MyErr<Serializable & Comparable<*>>`.
-In this case, when we match `a` inside the function, we, unexpectedly, do not result in a `MyErr<Int>`.
-So the only option is to treat `B` as a subtype of `Int`.
-
-In case of contravariant `MyErr`, based on the same problem we have to fix `B` to be a supertype of `Int`.
-So the constraint reduced from `D :> Int | B` is `D :> B` and `B :> Int`.
-
-Summarizing, we have several options for handling generics:
-- No generics
-- Invariant generics fixed to explicitly written
-- Generics strictly fixed to explicitly written
-- Generics softly fixed to explicitly written with respect to variance
+  Then we may just check if the resulting type is a subtype of the expected type and provide a message if not.
 
 ### Relation to other features
 
 #### Smart casts
 
-We should add support for error unions in smart casts.
+We have to add support for error unions in smart casts.
 For example:
 
 ```kotlin
@@ -385,7 +388,9 @@ It is straightforward to make a smart cast in a first branch.
 Actually, it works almost the same as now.
 
 While the second branch is more complicated as it does not have any analogues in the compiler for now.
-While the semantics of it is quite clear, we just have to exclude the checked type from the union.
+While the semantics of it is quite clear: 
+We have to exclude the checked type from the union 
+(more precisely, exclude all union items that are subtypes of the checked type).
 
 > For this case:
 > ```kotlin
@@ -397,4 +402,4 @@ While the semantics of it is quite clear, we just have to exclude the checked ty
 > }
 > ```
 > We do not want to infer something like `E \ Error1`.
-> Because it will lead us to more complicated system, resolution of which is subexponential afaik.
+> Because it will lead us to a more complicated system, resolution of which is subexponential AFAIK.
