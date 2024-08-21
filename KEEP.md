@@ -8,13 +8,18 @@
 
 ## Problem statement
 
-The problem addressed in this KEEP is the support on the language level for error handling 
-in a way similar to `Either` in several languages or `Result` that is already presented in Kotlin.
-The difference is that we would like to have a more lightweight, flexible solution with more language-level support.
+### Overview
+
+In this KEEP, we propose a new way of error-handling supported on the language level in Kotlin.
+It is expected to cover cases similar to those covered by `Either` in different languages.
+
+It is possible to express full-power `Either` in Kotlin using sealed classes.
+Moreover, there is already a `Result` class in the standard library 
+that have a similar purpose but limited to `Throwable` as errors.
+The advantage of the proposed feature over these approaches is 
+that it has better language support, flexibility and performance.
 
 ### Covered use-cases
-
-Let's review the main use-cases for such a feature.
 
 #### In-place tags
 
@@ -37,7 +42,7 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 ```
 
 The variable found is used specifically for cases when a predicate looks like `{ it == null }`. 
-It's a typical pattern for functions that retrieve data from containers (single/singleOrNull/last/...).
+It's a typical pattern for functions that retrieve data from containers (`single`/`singleOrNull`/`last`/...).
 
 One way to rewrite the code without using the variable `found` is to use some kind of private tag:
 
@@ -45,22 +50,22 @@ One way to rewrite the code without using the variable `found` is to use some ki
 object NotFound
 
 inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
-var last: Any? = NotFound // We have to use the most common type Any?
-for (element in this) {
-if (predicate(element)) {
-last = element
-}
-}
-if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
-@Suppress("UNCHECKED_CAST")
-return last as T // unchecked cast
+    var last: Any? = NotFound // We have to use the most common type Any?
+    for (element in this) {
+        if (predicate(element)) {
+            last = element
+        }
+    }
+    if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+    @Suppress("UNCHECKED_CAST")
+    return last as T // unchecked cast
 }
 ```
 
 It might be a bit shorter, but we still have to trick our type system by using the most common type `Any?` 
 and performing an unchecked cast at the end.
 
-#### Unions as tags
+##### Unions as tags
 
 Combining the ideas of tags and unions, the mentioned code could be rewritten as follows:
 
@@ -68,34 +73,53 @@ Combining the ideas of tags and unions, the mentioned code could be rewritten as
 error object NotFound // new category of types
 
 inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
-var last: T | NotFound = NotFound
-for (element in this) {
-if (predicate(element)) {
-last = element
-}
-}
-if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
-return last // smart-cast to T
+    var last: T | NotFound = NotFound
+    for (element in this) {
+        if (predicate(element)) {
+            last = element
+        }
+    }
+    if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+    return last // smart-cast to T
 }
 ```
 
 Our functions work for all `T` and it doesn't have unchecked casts
 
-The other issue with this approach is the same as with null: input sequence may contain `NotFound` itself.
-To avoid this we may declare `NotFound` inside the `last` function and does not expose it outside.
-And it would be great if the type system could guarantee that this error will not be exposed outside the function.
+This code struggles with the same issues as were with `null`: 
+we do not have guarantees that `NotFound` will not be in the input sequence.
+To avoid this we may declare `NotFound` private to `last` function and does not expose it outside:
+
+```kotlin
+inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
+    error object NotFound
+    
+    var last: T | NotFound = NotFound
+    for (element in this) {
+        if (predicate(element)) {
+            last = element
+        }
+    }
+    if (last == NotFound) throw NoSuchElementException("Sequence contains no element matching the predicate.")
+    return last // smart-cast to T
+}
+```
+
+It is still possible that `NotFound` will leak due to programmer's mistake, 
+but for now it depends only on the function's developer of the function, not on the function's users.
+But it is useful to provide a type level guarantee that `NotFound` will not leak outside the function. 
 
 #### ...OrThrow / ...OrNull
 
-It's quite common to encounter functions that describe part of their effects for error cases in their names. 
-This pattern could be enhanced by having only one function with a functional name like get or processRequest, 
+It's quite common to encounter functions that describe part of their effects for error cases in their names.
+This pattern could be enhanced by having only one function with a functional name like `get` or `processRequest`,
 where exceptional cases are encoded in the signature.
 
 A typical example could be our functions `maxOf` 
 ([code](https://github.com/JetBrains/kotlin/blob/0938b46726b9c6938df309098316ce741815bb55/libraries/stdlib/common/src/generated/_Arrays.kt#L14700)) 
 where many functions are duplicated to have `maxOfOrNull` counterpart in case of empty collections.
 
-#### Moving unions to return types
+##### Moving unions to return types
 
 With the error union types, it could be possible to define one method that can encode all the necessary error cases:
 
@@ -117,10 +141,11 @@ This is where our presentation of unions as 'main' or 'extras' also works well
 We can consider operators `??.` (to compound errors on the left side) 
 and `??:` (elvis analogue, to evaluate RHS if there is an error)
 
+<!---
 ### Issue categories
 
 1. Internal errors.
-   In this case we would like to have a special error state that is local to the current function/class(/package?)
+   In this case, we would like to have a special error state that is local to the current function/class(/package?)
    Example of such a function is `last`.
    These states are expected to express some internal states and do not be exposed outside the scope.
    Not as types but as values as well.
@@ -131,24 +156,54 @@ and `??:` (elvis analogue, to evaluate RHS if there is an error)
    The desired output of this feature is to unify them in a single function which could be easily handled in both manners.
    More precisely, it has to be easily transformed into exception 
    and easily postponed to handle using language features like conditional call and elvis operator.
+-->
 
 ### Background
 
-TODO: Add information about similar features in other languages.
+#### Either
 
-Zig
+`Either` is a common way to handle errors in functional programming languages.
+It is parametrized with two types: one for the successful result and one for the error.
+It has two constructors: `Left` and `Right` which are used to store the result and the error respectively.
+In Kotlin, it is possible to implement `Either` using sealed classes:
 
-Rust
+```kotlin
+sealed class Either<out L, out R>
+data class Left<out L>(val error: L) : Either<L, Nothing>()
+data class Right<out R>(val value: R) : Either<Nothing, R>()
+```
 
-Either
+To eliminate `Either` you could use common `when` expression:
 
-Effects
+```kotlin
+val result: Either<Int, String> = ...
+when (result) {
+    is Left -> println("Error: ${result.error}")
+    is Right -> println("Value: ${result.value}")
+}
+```
+
+It is possible to implement `Either` on the language level with the same operators as proposed for error unions.
+But this approach has several disadvantages:
+- `Either` with several errors is sensitive to the structure and order:
+  `Either<A, Either<B, C>>` is not the same as `Either<Either<A, B>, C>` or `Either<B, Either<A, C>>`.
+  Which may lead to complications for code refactoring or reordering.
+- Error type in `Either` is a common type in a Kotlin type system.
+  Consequently, if you would like to have several possible errors, you have to create a sealed hierarchy for them.
+  And you will not be able to return a subset of this hierarchy by handling only a part of errors.
+- Even with the introduction of arbitrary unions, due to expressiveness of common types, unions on them will be limited.
+
+#### Error union type in Zig
+
+The most similar feature to the proposed one is [error union types in Zig](https://ziglang.org/documentation/master/#Error-Union-Type).
+
+TODO: overview on them.
 
 ### Goals
 
-1. Cover both mentioned use-cases.
+1. Cover mentioned use-cases.
 2. Minimize boilerplate required to operate with errors to the same level as with nulls.
-3. Minimal performance overhead.
+3. Minimize performance overhead.
    Preferably to have an errors without data with the performance comparable to `null`.
 
 ## Proposal
@@ -167,7 +222,6 @@ This performance issue is similar to one encountered in the JVM at the moment of
 
 The other and more significant problem with full-fledged approach is
 that it is not easily supported by the type inference.
-
 When unions are discussed in terms of Kotlin's future, they are required to be disjoint.
 But in the case of errors, it is not possible.
 Let's consider the example of the `find` function.
@@ -338,7 +392,7 @@ To allow easily transform `errors` into exceptions or null, we may introduce a n
     
 ```kotlin
 fun <T> (T | Error).orThrow() {
-    contract { returns() implies (this@orThrow !is Error) }
+    contract { returns() implies (this !is Error) }
     // ...
 }
 
@@ -395,6 +449,17 @@ But with local errors, it is possible to guarantee the correctness of non-exposu
 > To expand the applicability of this feature, 
 > we may introduce a common supertype for all errors plus all errors local to the current scope.
 > F.e. `Error@last` which is a supertype of `Error` and errors local to class of `last` and `last` function itself.
+
+### Operators
+
+TODO
+
+To make the feature more usable, we have to introduce the same operators as for nullable types.
+- `??.` -- conditional call
+- `??:` -- elvis operator
+- `?!!` -- force operator
+
+TODO: Is it possible to re-use the same syntax as for nullable types?
 
 ### Runtime representation
 
@@ -525,3 +590,7 @@ We have to exclude the checked type from the union
 > ```
 > We do not want to infer something like `E \ Error1`.
 > Because it will lead us to a more complicated system, resolution of which is subexponential AFAIK.
+
+#### GADTs
+
+TODO
