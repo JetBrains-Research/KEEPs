@@ -1,11 +1,5 @@
 # Union Types for Errors
 
-## References
-
-- [Marat's quip (April 11)](https://jetbrains.quip.com/fOg9A3IXwD4b/Restricted-union-types)
-- [Youtrack issue](https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors)
-- [Set-theoretic types](https://www.irif.fr/~gc/papers/set-theoretic-types-2022.pdf)
-
 ## Problem statement
 
 ### Overview
@@ -421,8 +415,7 @@ class C {
 It is straightforward to control their scope on the type level as it is the same as for the common local classes.
 
 To track their scope on the value level, we declare them as not subtypes neither of `Error` nor of `Any`.
-But we leave them as a supertype of `Nothing`. 
-(TODO: check if it is safe)
+But we leave them as a supertype of `Nothing`.
 Because of this, for every value that may contain this error, it has to be directly expressed in the type.
 Thus, if a type is not exposed out of the declared scope, the value is not exposed either.
 
@@ -443,23 +436,30 @@ If we just limit the scope of the error on the type-level (common private error)
 and developer will track that this error is not exposed outside the function.
 But with local errors, it is possible to guarantee the correctness of non-exposure on the type level.
 
-> Because of such limitedness of their applicability we may introduce another modifier (`local`) for local errors and use `private` modifier in a same way as for classes.
-> Or just do not have such a feature and leave everything on the programmer.
+> Because of such limitedness of their applicability we may introduce another modifier (`local`) for local errors 
+> and use `private` modifier in a same way as for classes.
 
 > To expand the applicability of this feature, 
 > we may introduce a common supertype for all errors plus all errors local to the current scope.
 > F.e. `Error@last` which is a supertype of `Error` and errors local to class of `last` and `last` function itself.
 
-### Operators
+> TODO: discuss if this feature really needed.
+> 
+> IMO it is too complicated, not so useful and does not align with the other language.
 
-TODO
+### Operators
 
 To make the feature more usable, we have to introduce the same operators as for nullable types.
 - `??.` -- conditional call
 - `??:` -- elvis operator
 - `?!!` -- force operator
 
-TODO: Is it possible to re-use the same syntax as for nullable types?
+Semantics of these operators is obvious.
+
+> Is it possible to re-use the same syntax as for nullable types?
+> Why not?
+> Actually it is a better design that also allows considering null as just an error type.
+> TODO: discuss
 
 ### Runtime representation
 
@@ -589,8 +589,11 @@ We have to exclude the checked type from the union
 > }
 > ```
 > We do not want to infer something like `E \ Error1`.
-> Because it will lead us to a more complicated system, resolution of which is subexponential AFAIK.
+> Because it will lead us to a more complicated system, resolution of which is subexponential, non-deterministic, 
+> and it produces worse error messages.
+> (see [Set-theoretic types](https://www.irif.fr/~gc/papers/set-theoretic-types-2022.pdf))
 
-#### GADTs
+## References
 
-TODO
+- [Marat's quip (April 11)](https://jetbrains.quip.com/fOg9A3IXwD4b/Restricted-union-types)
+- [Youtrack issue](https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors)
