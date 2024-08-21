@@ -2,7 +2,7 @@
 
 We believe that there are some strong connections between pattern-matching, compound expressions, and destructuring.
 The main purpose of this document is to discover those possible connections deeper.
-Please, note, even though the document presents one of the possible designs, it us not any kind of final proposal but just a way to demonstrate an alternative view.
+Please, note, even though the document presents some ideas about the possible design concrete syntax, it is not any kind of final proposal but just a way to demonstrate an alternative view or/and some point.
 
 ## Keystones
 
@@ -43,7 +43,13 @@ please, do not consider those answers as final, we are more than happy to discus
      - I do not like `name = name`
    + Approach 2: Use something like `_ = name is D(...)` to avoid of introduction `name` into the context, otherwise add the name
    + Approach 3: use explicit `val`/`var` declarations
-   + Approach 3: Haskell-style `@`
+     + example: C#
+        ``` C#
+        order switch
+        {
+           { Cost: var y, ... } => ...
+        ```
+   + Approach 3: Haskell-style and Scala-style `@`
    + Approach 5: Forbid binging and destructuring in one place
      - Further, we *assume this option*
      - I.e.
@@ -63,17 +69,95 @@ please, do not consider those answers as final, we are more than happy to discus
 7. Do we want to have a special syntax for pattern-matching (name-based?) and destructuring to be exhaustive
    + Example: something like `(a,b)!` or `(a,b|)` or `(a,b,EOC)` meaning it is a dataclass with exactly two public fields
    + Alternative: `(a,b,..)` meaning dataclass has at least fields `a` and `b`
+8. Do we want allow in name-based destructuring to match/add restrictions several times on some field?
+   + example: C#  
+      ```C#
+      order switch
+      {
+        { Cost: var y, Cost: > 500.00m } => 0.05m,
+        ...
+      }
+      ```
+9. Do we want allow pattern-matching with concrete values and vars/vals using the same syntax?
+   + I guess, yes
+10. Conditions on fields inside patterns?
+11. `and` and `or` in pattern-matchings?
+12. Do we allow matter-matching on **several** values?
 
+---
+# Approach 1: explicit declarations
+
+```Kotlin
+class Address(val city: String, val Street: String, val Zip: String, ...) {...}
+class User(val name: String, val age: Int, val address: Address) {...}
+val u = User (....)
+when (u) { // name-based:
+  // C#-style name-based
+  { age: val age, age: > 18, 
+    address: val address, address: { city: "Spb" } } -> ...  
+  
+  // no field repeats: 1
+  is User(val age = age && age > 18, 
+    val address = address dis ( city == "Spb" ) ) -> ...  
+  
+  // no field repeats: 2
+  is User(val age = age, age > 18, 
+    val address dis ( city == "Spb" ) ) -> ...  
+  
+  // no field repeats: 2
+  is User(val age = age && age > 18, 
+    val newAddress = address dis ( city == "Spb" ) ) -> ...  
+  
+  // same but no name introduction and conditions in one place
+  dis ( val age = age ) if age > 18 -> ...  
+  // same but Is
+  is User( val age = age ) if age > 18 -> ...  
+
+  // the same but omit `=` if names coinside
+  ( val age ) if age > 18 -> ...  
+}
+
+// in case of explicit declarations I insist on the following destructuring design:
+let x is User( val age = age )
+
+```
+
+
+```Kotlin
+class User(val name: String, val age: Int) { ... }
+val u = User (....)
+when (u) { // name-based:
+  is User{ age: val age, age: > 18 } -> ...  // C#-style name-based
+  is User( val age = age, age > 18 ) -> ...  // ?
+  is User( val age = age ) if age > 18 -> ...  // no name introduction and conditions in one place
+  is User( val age ) if age > 18 -> ...  // the same but omit `=` if names coinside
+}
+```
+
+---
+# Approach 2: implicit declarations
+
+
+-----
+-----
+-----
+-----
+-----
+-----
+-----
+-----
+-----
+-----
 ## Grammar
 
 Here we present the grammar for patterns in when-branch conditions.
 Each pattern $P$ is either
-* **fallible** --- $Is$ pattern, i.e. pattern matching with which may fail, or 
-* **infallible** --- $Dis$ pattern, i.e. pattern matching with which always succeeds.
+* **fallible** --- $Is$ pattern, i.e. pattern matching which may fail, or 
+* **infallible** --- $Dis$ pattern, i.e. pattern matching which always succeeds.
 
 Those patterns are very similar but can be distinguished by the keyword being used: `is` for fallible $Is$ patterns and `dis` for infallible $Dis$ patterns.
 We believe that infallible $Dis$ patterns can be successfully used for name-based destructuring in the very the same syntax whenever the destructuring happens, while fallible $Is$ patterns can be used in when-branch conditions (discussed later: or maybe in any other condition).
-Since it is an expected that pattern-matching on some specific pattern may fail we allow to mix fallible $Is$ patterns and `dis` for infallible $Dis$ patterns on different levels of patterns inside one when-branch condition.
+Since it is expected that pattern-matching on some specific pattern may fail we allow to mix fallible $Is$ patterns and `dis` for infallible $Dis$ patterns on different levels of patterns inside one when-branch condition.
 
 $$
 \begin{array}{lll}
@@ -150,9 +234,9 @@ Also note, that, for example, in lambdas
 ## Allowing vals and vars in patterns
 
 We suggest to consider all bindings as `val`s by default unless some special binding is not marked as `var`.
-For example, `v dis (b = x, var c, a)` or `{ (b = x, var c, a) -> ... }`.
+For example, `v dis (b = x, var c, a)` and `{ (b = x, var c, a) -> ... }`.
 
-But since simple destructuring statement it might be confusing:
+But with simple destructuring statement it might be confusing:
 </br>
 ```val a, var c, b = v dis (a, var b, c)```
 </br>
