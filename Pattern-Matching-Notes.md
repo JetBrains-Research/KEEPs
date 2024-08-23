@@ -10,6 +10,128 @@ Please, note, even though the document presents some ideas about the possible de
 2. Some other things to think about before making the final decision on destructurings and pattern-matching design
 3. We do not suggest any "final design"; it should be considered more as an example to show certain ideas and concerns
 
+* We consider destructuring to be infallible patterns, i.e. patterns with no conditions, no is checks, and no destructuring of nullable types.
+
+## Design 1: either destructuring or declarations
+
+Keystone: do not use nested destructuring together with declaration in one place
+
+```Kotlin
+(val x, val field@(val m, val z)) // Error
+(val x, val field) && (val m, val z) = field // Ok
+(val x, val y = field) && (val m, val z) = y // Ok
+```
+
+Pros:
+
+* Easy.
+
+Cons:
+
+* In lambdas `&&` syntax doesn't work (i.e. too ugly) but one can destruct further inside lambda's body.
+
+Also, obviously in this design one can't combine conditions with declarations and should place all conditions in guards:
+
+```Kotlin
+(val x, val y = field) && (> 5, val z) = y            // Error
+(val x, val y = field) && (val m > 5, val z) = y      // Error
+(val x, val y = field) && (val m, val z) = y if m > 5 // Ok
+(val x, val y = field) && (val m, val z) = y && m > 5 // alternative
+```
+
+Cons:
+
+* too many letters and conditions could be far from declarations (if condition is close to the declaration, then we can easily get more efficient compiled code):
+
+  ```Kotlin
+  // positional
+  (42, (in 42 .. Int.Max_Value , _))      // Error
+  (== 42, (> 42 , _))                     // Error
+  (val x, (val y, _)) && x == 42 && y > 5 // Ok
+  ```
+
+  ```Kotlin
+  // name-based
+  (x == 42, (y in 42 .. Int.Max_Value , _)) // Error
+  (x == 42, (y > 42 , _))                   // Error
+  (val x, (val y, _)) && x == 42 && y > 5   // Ok
+  ```
+
+  Suppose we have datum:
+  
+  ```Kotlin
+  data class A(a: String, b: String)
+  data class D(x: Int, s: A?)
+  ```
+  
+  and we have implicit invariant that if `x == 42` then `s` can't be `null`; then matching
+  
+  ```Kotlin
+  (x == 42, (val a == "City" , val b) = s) -> ...
+  ```
+  
+  is ok since if will fail if `x` is not equal to `42` before destructing `s`.
+  Otherwise, we need to perform more checks:
+
+  ```Kotlin
+  (val x, val s) && x == 42 
+    && (val a, val b) = s!! && a == "City" -> ...
+  ```
+
+  Note, we can't simply move nested destructuring inside branch's body since if it fails we can't return back to the original pattern-matching.
+
+TODO
+
+### formal grammar
+
+TODO
+
+### examples
+
+TODO
+
+## Design 2: combine destructuring and declarations
+
+```Kotlin
+(val x, val y@(val m, val z)) // Ok
+```
+
+1. How to combine this design with field renaming?
+
+    ```Kotlin
+    (val x, (val m, val z) = field) // just destruct `field`
+    (val x, val field@(val m, val z) = field) // introduces `field` name
+    (val x, val y@(val m, val z) = field) // new name `y` for `field`
+    ```
+
+    ```Kotlin
+    // alternative syntax with `is`
+    (val x, field is (val m, val z) ) // doesn't introduce name `field` 
+    (val x, val field is (val m, val z) ) // introduce name `field`
+    (val x, val y = field is (val m, val z) ) // introduces name `y`
+    (val x, field is val y@(val m, val z) )   // alternative
+    (val x, field is val y=(val m, val z) )   // alternative
+    ```
+
+TODO
+
+### formal grammar
+
+TODO
+
+### examples
+
+TODO
+
+## Design 3: just follow C\# style
+
+TODO
+
+---
+---
+---
+
+<!-- --wrong:
 $$
 \begin{array}{lll}
 \langle\text{when branch condition} \rangle  & \Coloneqq & (P\ |\ Cond)\ (\text{\color{red}if}\ \langle \text{guards} \rangle)? & \\
@@ -22,7 +144,7 @@ PositionalDestr &\Coloneqq & (Decl\ \langle\text{Identifier}\rangle)?\ (Cond\ |\
 Cond &\Coloneqq & Cmp\ <Expression>\ |\ \text{\color{red}in}\ \dots \ |\ \dots \\
 Cmp  &\Coloneqq & ==\ |\ !=\ |\ >=\ |\ \dots \\
 \end{array}
-$$
+$$ -->
 
 we can consider `is` to be a reversed assignment
 ```Kotlin
@@ -58,6 +180,31 @@ val m@(val x, val y, var z@(val k, var p)) = <expr>
 // maybe val as default:  --- then it coincides with the current syntax
 val (x, y, var z@(k, var p)) = <expr>
 ```
+
+We can consider when with receiver to be implicit intro of it in each branch:
+```Kotlin
+when (<expr>) {
+  == 5 -> ...
+  > 5, > k -> ...
+  .foo() = 5 -> ...
+  is A (...) -> ...
+}
+// synonym for
+val x = <expr>
+when {
+  x == 5 -> ...
+  x > 5, x > k -> ...
+  x.foo() = 5 -> ...
+  x is A (...) -> ...
+}
+``` 
+Cons: current behaviour is different: 
+```Kotlin
+when (x){
+  5 -> ... // not == 5
+  in 5 .. Int.MAX_VALUE -> ... // not > 5
+}
+``` 
 
 ## Questions
 
@@ -226,7 +373,7 @@ Those patterns are very similar but can be distinguished by the keyword being us
 We believe that infallible $Dis$ patterns can be successfully used for name-based destructuring in the very the same syntax whenever the destructuring happens, while fallible $Is$ patterns can be used in when-branch conditions (discussed later: or maybe in any other condition).
 Since it is expected that pattern-matching on some specific pattern may fail we allow to mix fallible $Is$ patterns and `dis` for infallible $Dis$ patterns on different levels of patterns inside one when-branch condition.
 
-$$
+<!-- $$
 \begin{array}{lll}
 \langle\text{when branch condition} \rangle  & \Coloneqq & (P\ |\ \text{\color{red}in}\ \dots \ |\ \dots)\ (\text{\color{red}if}\ \langle \text{guards} \rangle)? & \\
 P &\Coloneqq &Is\ |\ Dis \\
@@ -238,7 +385,7 @@ PositionalDestr &\Coloneqq & \langle\text{Identifier}\rangle \ |\ \_\ |\ P\ |\ C
 Cond &\Coloneqq & Cmp\ <Expression>\ |\ ... \\
 Cmp  &\Coloneqq & ==\ |\ !=\ |\ >=\ |\ ... \\
 \end{array}
-$$
+$$ -->
 
 NB: 
 * $Dis$ itself **always succeed** while $Is$ is a usual is-check and **may fail**
