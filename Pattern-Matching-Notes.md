@@ -10,6 +10,54 @@ Please, note, even though the document presents some ideas about the possible de
 2. Some other things to think about before making the final decision on destructurings and pattern-matching design
 3. We do not suggest any "final design"; it should be considered more as an example to show certain ideas and concerns
 
+$$
+\begin{array}{lll}
+\langle\text{when branch condition} \rangle  & \Coloneqq & (P\ |\ Cond)\ (\text{\color{red}if}\ \langle \text{guards} \rangle)? & \\
+P &\Coloneqq &Is \\
+Is &\Coloneqq & \text{{\color{red}is}}\ \langle\text{ClassName}\rangle\ Destr?\ |\ \text{{\color{red}is}}?\ Destr \\
+Decl & = & \text{{\color{red}val}}\ |\ \text{{\color{red}var}} \\
+Destr &\Coloneqq & (\ NamedDestr^{+}\ )\ |\ (\ PositionalDestr^{+}\ ) \\
+NamedDestr &\Coloneqq & Decl?\ (\langle \text{Identifier}\rangle\ =\ )?\ \langle\text{FieldName}\rangle\ (Is\ |\ Cond)? \\
+PositionalDestr &\Coloneqq & (Decl\ \langle\text{Identifier}\rangle)?\ (Cond\ |\ P)? \ |\ \_ \\
+Cond &\Coloneqq & Cmp\ <Expression>\ |\ \text{\color{red}in}\ \dots \ |\ \dots \\
+Cmp  &\Coloneqq & ==\ |\ !=\ |\ >=\ |\ \dots \\
+\end{array}
+$$
+
+we can consider `is` to be a reversed assignment
+```Kotlin
+(val x, val y) = z  <===>  z is (val x, val y)
+// syntax 1
+fieldName is val newName@Class(val x, val y)
+// syntax 2
+val newName@Class(val x, val y) = fieldName
+```
+
+`dis` === `is` without *Cond* and *ClassNames*
+
+```Kotlin
+// name-based destructuring
+// syntax 1
+let <expr> is val k@(field1 is val x, 
+                     field2 is val y@(filed1 is var m, var filed2)
+// syntax 2
+val k@(val x = field1, 
+       val y@(var m = filed1, var filed2) = field2)
+    = <expr>
+```
+
+```Kotlin
+// current position-based destructuring
+val (x,y,z) = <expr>
+// syntax 1
+let <expr> is val m@(val x, val y, var z@(val k, var p))
+let <expr> is (val x, val y, var z@(val k, var p))
+// syntax 2
+val m@(val x, val y, var z@(val k, var p)) = <expr>
+(val x, val y, var z@(val k, var p)) = <expr>
+// maybe val as default:  --- then it coincides with the current syntax
+val (x, y, var z@(k, var p)) = <expr>
+```
 
 ## Questions
 
@@ -83,13 +131,19 @@ please, do not consider those answers as final, we are more than happy to discus
 10. Conditions on fields inside patterns?
 11. `and` and `or` in pattern-matchings?
 12. Do we allow matter-matching on **several** values?
+13. Do we want name-based and positional destructurings have the same/similar or different syntax?
+    + C# uses different syntax
+    + It is possible to have the same but sometimes it might be confusing since it is the property of the type
 
 ---
 # Approach 1: explicit declarations
 
 ```Kotlin
-class Address(val city: String, val Street: String, val Zip: String, ...) {...}
+class Address(val city: String, val street: String, val zip: String, ...) {...}
 class User(val name: String, val age: Int, val address: Address) {...}
+```
+pattern-matching:
+```Kotlin
 val u = User (....)
 when (u) { // name-based:
   // C#-style name-based
@@ -113,17 +167,30 @@ when (u) { // name-based:
   // same but Is
   is User( val age = age ) if age > 18 -> ...  
 
-  // the same but omit `=` if names coinside
+  // the same but omit `=` if names coincide
   ( val age ) if age > 18 -> ...  
 }
-
-// in case of explicit declarations I insist on the following destructuring design:
-let x is User( val age = age )
-
+```
+destructuring:
+```Kotlin
+// in case of explicit declarations I insist on the following or similar destructuring design:
+// here `let` is an indicator of declarations
+// syntax: let <expression> <Dis_pattern>
+let x dis (val age = age)
+// alternatives: I do not like any of them
+( val new_age = age ) = x
+let ( val new_age = age ) = x
+val ( val new_age = age ) = x
+let (new_age) = x as (val new_age = age)
+...
+```
+lambdas:
+```Kotlin
+{ ( val age ) -> ... }
+{ ( val age , var newStreet = street ) -> ... }
 ```
 
-
-```Kotlin
+<!-- ```Kotlin
 class User(val name: String, val age: Int) { ... }
 val u = User (....)
 when (u) { // name-based:
@@ -132,7 +199,7 @@ when (u) { // name-based:
   is User( val age = age ) if age > 18 -> ...  // no name introduction and conditions in one place
   is User( val age ) if age > 18 -> ...  // the same but omit `=` if names coinside
 }
-```
+``` -->
 
 ---
 # Approach 2: implicit declarations
@@ -167,7 +234,9 @@ Dis &\Coloneqq & Destr \\
 Is &\Coloneqq & \text{{\color{red}is}}\ \langle\text{ClassName}\rangle\ Destr? \\
 Destr &\Coloneqq & (\ NamedDestr^{+}\ )\ |\ (\ PositionalDestr^{+}\ ) \\
 NamedDestr &\Coloneqq & (\langle\text{Identifier}\rangle\ =\ )?\ \langle\text{FieldName}\rangle \ |\ \langle \text{FieldName} \rangle\ (Is\ |\ \text{{\color{red}dis}}\ Dis) \\
-PositionalDestr &\Coloneqq & \langle\text{Identifier}\rangle \ |\ \_\ |\ P \\
+PositionalDestr &\Coloneqq & \langle\text{Identifier}\rangle \ |\ \_\ |\ P\ |\ Cond\\
+Cond &\Coloneqq & Cmp\ <Expression>\ |\ ... \\
+Cmp  &\Coloneqq & ==\ |\ !=\ |\ >=\ |\ ... \\
 \end{array}
 $$
 
