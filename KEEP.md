@@ -456,9 +456,20 @@ To make the feature more usable, we have to introduce the same operators as for 
 
 Semantics of these operators is obvious.
 
-> Is it possible to re-use the same syntax as for nullable types?
-> Why not?
-> Actually it is a better design that also allows considering null as just an error type.
+> Is it possible to re-use the same operators as for nullable types?
+> If we do that, initially, code does not change its semantics as there will be additional is check for each conditional "something".
+> (Which could be eliminated in some cases for performance)
+> But it may affect expected semantics with the new feature.
+> For example:
+> ```kotlin
+> fun <T : Any> containsNulls(l: List<T?>): Boolean {
+>    l.forEach { it ?: return true }
+>    return false
+> }
+> ```
+> Yes, this function is not written well, but it may exist and user may expect that it will work as expected.
+> Is it bad to "change" the semantics of this function?
+> Do we want in some future to consider `T?` as `T | Null` for simpler design and minimization of features?
 > TODO: discuss
 
 ### Runtime representation
@@ -592,6 +603,13 @@ We have to exclude the checked type from the union
 > Because it will lead us to a more complicated system, resolution of which is subexponential, non-deterministic, 
 > and it produces worse error messages.
 > (see [Set-theoretic types](https://www.irif.fr/~gc/papers/set-theoretic-types-2022.pdf))
+> 
+> On the contrary, if we have something like:
+> ```kotlin
+> val t: T
+> t ??: return
+> ```
+> We should smart-cast `t` to `T & Value`
 
 ## References
 
