@@ -100,8 +100,8 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 ```
 
 It is still possible that `NotFound` will leak due to programmer's mistake, 
-but for now it depends only on the function's developer of the function, not on the function's users.
-But it is useful to provide a type level guarantee that `NotFound` will not leak outside the function. 
+but for now it depends only on the developer of the function, not on the function's users.
+But it may be useful to provide a type level guarantee that `NotFound` will not leak outside the function. 
 
 #### ...OrThrow / ...OrNull
 
@@ -191,7 +191,29 @@ But this approach has several disadvantages:
 
 The most similar feature to the proposed one is [error union types in Zig](https://ziglang.org/documentation/master/#Error-Union-Type).
 
-TODO: overview on them.
+The broad overview of the feature is the following:
+- Error types are just tags without data, represented as integers at runtime.
+- Arbitrary unions are allowed.
+- Allowed inference of error in return type. (But it is limited)
+- In debug mode, tracing of error bubbling is enabled.
+
+#### Effects as error handling
+
+Effects is another technique to handle errors.
+It is used in languages like: TODO:...
+
+The idea is that functions may trigger some effects, which are handled by the respective handler at the callstack.
+The difference with exceptions is that effects are:
+- Type-safe, as all possible effects have to be handled.
+- Allows continuing execution after the effect is handled.
+
+Effects is a very promising technique that is actively researched and used in some languages.
+They may even be implemented in Kotlin in future using coroutines and context parameters.
+The good example of their adoption for OO language is [Scala's capabilities](https://docs.scala-lang.org/scala3/reference/experimental/cc.html).
+
+But we state that their use-cases are different from the proposed feature.
+While they are great to track some io interactions and more complex exceptions, 
+they may be too complex to handle simple cases like function `last` or that user's age is not in the range.
 
 ### Goals
 
@@ -210,8 +232,7 @@ But this approach has several significant issues.
 
 The first problem of this full-flavored approach is performance-based.
 All functions that would like to have a specific internal state create a new private class.
-If they are mapped to separate JVM classes, 
-it leads to a significant number of small classes in JVM and class-loader calls.
+Mapping them to separate JVM classes leads to a significant number of small classes in JVM and class-loader calls.
 This performance issue is similar to one encountered in the JVM at the moment of lambda's introduction.
 
 The other and more significant problem with full-fledged approach is
@@ -268,15 +289,15 @@ With this approach, we do not allow for error types:
   - There are no clear use-cases where subtyping is significant and could not be replaced with typealias.
     More precisely:
     ```kotlin
-    abstract error DbError
-    error DbConnectionCancelled : DbError
-    error DbTokenExpired : DbError
+    abstract error class DbError
+    error class DbConnectionCancelled : DbError
+    error class DbTokenExpired : DbError
     // replace with:
-    error DbConnectionCancelled
-    error DbTokenExpired
+    error class DbConnectionCancelled
+    error class DbTokenExpired
     typealias DbError = DbTokenExpired | DbConnectionCancelled
     ```
-  - Subtyping forces us to use 1to1 mapping from errors to JVM classes which have mentioned performance issues
+  - Subtyping forces us to use 1to1 mapping from errors to JVM classes which have mentioned performance issues.
   - Type inference for errors will never infer a supertype.
     Instead, it will just list all possible actual errors.
     So supertype is only for explicit annotations.
@@ -288,12 +309,10 @@ With this approach, we do not allow for error types:
 
 ### Design overview
 
-#### Global error unions
-
-Error type is a separate type kind, which is declared using a keyword `error`.
+Error type is a separate type kind, which is declared using a soft keyword `error`.
 
 ```kotlin
-error MyError(val code: Int)
+error class MyError(val code: Int)
 ```
 
 > There is an approach where an error type could be declared in-place using different syntax.
@@ -395,82 +414,286 @@ fun <T> (T | Error).orNull(): T? {
 }
 ```
 
-#### Local error unions
+### Relation with `null`
 
-Local error type is an error defined in a specific scope.
-They express some exceptional state of the function/class that exists only in internal logic. 
-They are expected not to leave it neither on the type level nor on the value level.
-They are declared in the same way as global errors but with visibility modifiers.
+The problem of `null` is that it is currently used both as a special value and as an error.
+Are these cases really different?
+As we are introducing a special construction for errors, what is the future of `null`?
 
-```kotlin
-fun last() {
-   error NotFound
-}
+Firstly, let's answer the question: Are we really interested in this division?
+At first sight, it may affect how user handles errors and special values.
+- Errors may be:
+  - Processed with different logic.
+    For example, display different messages for user or try to silently refresh the token in case of network error.
+    Required language support: `when` expression.
+  - Processed with simple same logic.
+    For example, pass to logger, replace with default value, return them or throw an exception.
+    Required language support: elvis operator + `orThrow`, `asException`, `check`, `require` functions + `!!` operator.
+  - Processed with complex same logic.
+    For example, restore state or retry the operation.
+    Required language support: `is Error` condition for `if` expression.
+  - Accumulated by different calls to be bunch-processed later.
+    To not process them into C-style error codes.
+    Required language support: safe call operator.
+  - TODO...
+- Special values may be:
+  - Processed with different logic.
+    Required language support: `when` expression.
+  - Replaced with default value (are they actually a value in this case?).
+    Required language support: elvis operator.
 
-class C {
-   private error NotFound
-}
-```
+As a result, we are interested in this division because special values do not require any special language support.
+While errors require that all mentioned operators applied only to errors, not to special values.
+For example, if we consider `null` as a special value, we have to have an operator that filters out only errors.
 
-It is straightforward to control their scope on the type level as it is the same as for the common local classes.
+Secondly, let's iterate over all nine possibilities of error design and relation to `null`:
 
-To track their scope on the value level, we declare them as not subtypes neither of `Error` nor of `Any`.
-But we leave them as a supertype of `Nothing`.
-Because of this, for every value that may contain this error, it has to be directly expressed in the type.
-Thus, if a type is not exposed out of the declared scope, the value is not exposed either.
+|                              | Errors are only errors | Errors explicitly divided into errors and states | Errors implicitly divided into errors and states |
+|------------------------------|------------------------|--------------------------------------------------|--------------------------------------------------|
+| `null` is only error         | 3                      | 1.1.1                                            | 1.2                                              |
+| `null` is only special value | 2.1                    | 1.1.2                                            | 1.2                                              |
+| `null` is both               | 2.2                    | 1.1.3                                            | 1.2                                              |
 
-The issue with this approach is that we are not able to pass value with this error in any function.
-Even if we would like to have a private function expected to accept such value as an argument, 
-we have to specify it explicitly.
-And if we would like for this function to optionally accept this error, we have to write such a boilerplate:
-```kotlin
-private error MyError
+Numbers are references to the elaboration of the combinations.
 
-private fun <T, LOCE : MyError> foo(v : T | LOCE): T | LOCE
-```
-As a result, any value with such errors has significantly limited usability.
+Elaboration of single choices:
+- "`null` is only error".
+  In this case, we consider:
+  - Users should use `null` in cases function may fail, and they do not care about the reason.
+  - Users should not use `null` as a built-in `Optional`.
+  
+  Consequences:
+  -  `null` have to be deprecated in favor of error `Null`.
+     Because if it is only an error, it is better to merge the two concepts.
+  -  It sounds impossible as it means that we have to push all the users to rewrite their code with `Optional`
+- "`null` is only special value".
+  In this case, we consider:
+  - Users should use `null` only as a built-in `Optional`.
+  - Users should not use `null` as an error in favor of explicit and more informative errors. 
+    Or just `T | Failure` if they do not care about the reason.
+  
+  Consequences:
+  - We have to have separate operators for `null` and errors.
+    As they have to exist for `null` due to backward compatibility and for errors due to the feature requirements.
+  - We have to push users to rewrite their code where `null` is used as an error.
+    Which is ok as it is actually why we are introducing this feature,
+    and it is easy to do as they will have a backward compatible operators.
+- "`null` is both".
+  In this case we consider users should use `null` in any case they want.
+- Errors are only errors.
+  In this case, we consider that errors are used only as errors.
+  And any case and issue where they are used as special values should be considered as a bad design and ignored.
+- Errors explicitly divided into errors and states.
+  In this case, we consider that errors are used both as errors and as special values, 
+  and it is implemented on the language level.
+  For example:
+  ```kotlin
+  error NetworkError(val code: Int, val message: String)
+  state NoValue
+  
+  fun request(): Int | NoValue | NetworkError
+  ```
+  
+  Consequences:
+  - We have to filter out only errors in the operators.
+  - Unpredictable behavior for the constructs that looks similar.
+  - Looks alien to the OO-language design.
+- Errors implicitly divided into errors and states.
+  In this case, we consider that errors are used both as errors and as special values, 
+  but it is not implemented on the language level.
+  For example:
+  ```kotlin
+  error NetworkError(val code: Int, val message: String)
+  error NoValue
+  
+  fun request(): Int | NoValue | NetworkError
+  ```
+  
+  Consequences:
+  - We should allow user to choose what to filter out in this specific case.
+  - We have to cover some cases that may be considered as a bad design for OO-language.
 
-The main use-case of local errors is `last` function.
-It is possible to implement it using a common errors.
-If we just limit the scope of the error on the type-level (common private error) 
-and developer will track that this error is not exposed outside the function.
-But with local errors, it is possible to guarantee the correctness of non-exposure on the type level.
+Let's review the combinations on a specific example.
+We have a function `request` that may return `Optional<Int>` or `NetworkErrors` 
+(`NetworkErrors` should be considered as a typealias on several errors).
+Which return type is expected?
 
-> Because of such limitedness of their applicability we may introduce another modifier (`local`) for local errors 
-> and use `private` modifier in a same way as for classes.
+1. ```kotlin
+   fun request(): Int | NoValue | NetworkErrors
+   ```
+   In this case, errors are used both as special values and as errors.
+   If we see this as an expected design, we state that errors may be used anywhere as a special value.
+   And there may be more than one special value (f.e. `Int | Uninitialized | NoValue`).
+   Whether this "error" is an error or special value may be determined on the declaration-site or use-site.
+   
+   1. Declaration-site.
+      In this case we have to introduce a new modifier `state` for errors that are used as special values.
+      ```kotlin
+      error class NetworkError(val code: Int, val message: String)
+      state class NoValue
+      ```
+      We also have to have an operator that filters out only errors.
+      1. If `null` is considered as an error, we may re-use the same operators as for nullable types.
+      2. If `null` is considered as a special value, we have to introduce a new operators.
+      3. If `null` is considered as both, we are:
+         - not able to transform `null` into `Null`.
+         - have to introduce a new operators.
+         - have to allow merging operators for errors and null concisely.
+           For cases where null is used as an error.
 
-> To expand the applicability of this feature, 
-> we may introduce a common supertype for all errors plus all errors local to the current scope.
-> F.e. `Error@last` which is a supertype of `Error` and errors local to class of `last` and `last` function itself.
+         So this case looks strictly worse than any other.
+   2. Use-site.
+      In this case, we have to allow user to choose what is considered as an error in this context.
+      To allow this, we have to add a new generic parameter for operators.
+      ```kotlin
+      val v = request() ?:<NetworkErrors> return
+      val v = request()?.<NetworkErrors>process()
+      val v = request()!!<NetworkErrors>
+      ```
+      > It may be called as "Sad Elvis operator".
+   
+      In this case null could be unconditionally transformed into `Null` and user will decide what to filter out.
 
-> TODO: discuss if this feature really needed.
-> 
-> IMO it is too complicated, not so useful and does not align with the other language.
+   Consequences:
+   1. We should deprecate `null` in favor of error `Null`.
+     It will force people to use more sound names for errors in their cases and leave `Null` only for legacy and Java/JVM interop.
 
-### Operators
+   Advantages:
+   1. No `null`.
+   2. Less syntactic categories, no different (but similar) handling of `null` and errors in compiler and programmer's mind.
+   
+   Disadvantages:
+   1. It looks alien to the OO language design.
+   2. It may be harder to design `Error` typing to be comfortable for both errors and special values. TODO: reflect on this.
+2. ```kotlin
+   fun request(): Int? | NetworkErrors
+   ```
+   This case is divided into two:
+   1. `null` is used only as a special value.
+      Errors are used only as errors.
+      
+      Consequences:
+      1. We do not consider `null` as error in our design.
+         (Only in terms of backward compatibility)
+      2. We disallow any future view on `null` as an error `Null`.
+      3. Theoretically, it is possible to change the semantics of operators for `null` into operators for errors and do not introduce new operators.
+
+      Advantages:
+      1. No significant changes in the language.
+      2. Overhead-less optional for JVM in composition with errors
+   
+      Disadvantages:
+      1. `null` exists.
+      2. `null` is too similar to errors but different.
+         People may continue to use it as an error and report something as a bad design.
+      3. Different operators for `null` and errors.
+         More complicated syntax.
+      4. After release of project Valhalla, there will be another overhead-less `Optional` in the language.
+         (But it will have an overhead if it is mixed with errors)
+   2. `null` is allowed to be used as both.
+      It is mostly the same as the previous case.
+      Differences:
+      - We have to add an operator that filters both nulls and errors.
+        Otherwise, we state that if you used `null` as an error, you do not have any operators.
+        It is bad and easier to just consider option where null is only a special value.
+      - It is not possible to change the semantics of operators for `null` into operators for errors.
+3. ```kotlin
+   fun request(): Optional<Int> | NetworkErrors
+   ```
+   In this case, we consider users should design hierarchy for values.
+   Errors are used only as errors and named properly.
+   `null` is used as a specific error `Null`. 
+
+   Consequences:
+   1. We should deprecate `null` in favor of error `Null`.
+   2. Operators could be easily re-used from nullable types.
+   
+   Advantages:
+   1. No `null`
+   2. Less syntactic categories, no different (but similar) handling of `null` and errors in compiler and programmer's mind.
+   
+   Disadvantages:
+   1. Requires more letters to better design the value hierarchy.
+   2. No overhead-less optional for JVM.
+   3. Users may continue to use null for optional and do not use errors at all.
+   
+TODO: more advantages and disadvantages
+TODO: formatting (numbering only for suboptions)
+TODO: discuss
+
+> IMO we should go for the option 2.1
+> Thus, `null` has to be considered only as a special value, and errors are only as errors.
+> Use-cases where `null` is used as error or errors as special values we should consider as bad design 
+> and do not cover them.
+
+### New operators
 
 To make the feature more usable, we have to introduce the same operators as for nullable types.
+The simple idea is to replicate them with the same semantics:
 - `??.` -- conditional call
 - `??:` -- elvis operator
 - `?!!` -- force operator
 
-Semantics of these operators is obvious.
+Or we may introduce a new symbol for errors to make operators shorter: `#.`, `#:`, `#!!`/`##`/`#!`.
 
-> Is it possible to re-use the same operators as for nullable types?
-> If we do that, initially, code does not change its semantics as there will be additional is check for each conditional "something".
-> (Which could be eliminated in some cases for performance)
-> But it may affect expected semantics with the new feature.
-> For example:
-> ```kotlin
-> fun <T : Any> containsNulls(l: List<T?>): Boolean {
->    l.forEach { it ?: return true }
->    return false
-> }
-> ```
-> Yes, this function is not written well, but it may exist and user may expect that it will work as expected.
-> Is it bad to "change" the semantics of this function?
-> Do we want in some future to consider `T?` as `T | Null` for simpler design and minimization of features?
-> TODO: discuss
+As we consider null as a special value, we may ignore cases where user would like to filter both nulls and errors.
+This is because it is intended to be a different operations, 
+thus happen together in rare cases where two consecutive operators represent two different operations.
+For example:
+
+```kotlin
+val v = foo() ??: return
+              ?: return
+```
+
+This code is either a bad design because `foo` should use one more error that is hidden under `null`.
+Or it is a good code that just does the same operations in case of two totally different cases 
+(error happens in `foo` or `foo` returned `Optional.None` aka `null`).
+
+Safe call on both nulls and errors is not possible,
+but if you use `T?` as optional value, then your function should get `T?` as a receiver.
+Thus, the cases where it is required may be considered as a bad design.
+
+#### More new operators
+
+If we want to continue considering null as both a special value and an error.
+Then we should cover cases considered as a bad design in the previous section.
+Thus, we have to introduce operators that filter out both nulls and errors.
+They may look like:
+- `???.`, `???:`, `??!!`
+- `#?.`, `#?:`, `##!!`
+
+<!--
+
+#### No new operators
+
+If we consider option where no new operators required, the only problem is functions like this:
+
+```kotlin
+fun <T : Any> containsNulls(l: List<T?>): Boolean {
+   l.forEach { it ?: return true }
+   return false
+}
+```
+
+Yes, this function is not written well, but it may exist and user may expect that it will work as written.
+
+-->
+
+### Difference between class and object
+
+TODO: discuss do we want to separate `error object` and `error class` or not.
+
+> I propose not to introduce `error object` and have only `error class`, 
+> which is optimized to unique if they do not have data.
+
+We are able to transform errors without data into unique constants even without `object` keyword.
+Shouldn't we leave it on the optimization level?
+It will allow users to write errors easier as they do not have to think about the choice between `object` and `class`.
+
+### Error unions as types for compilation phases
+
+TODO: to filter impossible ancestors or states
 
 ### Runtime representation
 
@@ -611,7 +834,111 @@ We have to exclude the checked type from the union
 > ```
 > We should smart-cast `t` to `T & Value`
 
+## Extra considerations
+
+### Mixing with value types
+
+#### Kotlin's value types
+
+TODO
+
+#### Valhalla's value types
+
+TODO
+
+### Abuse cases
+
+Error types may be (ab)used as special values instead of errors.
+
+For example, it may be used like this:
+
+```kotlin
+sealed interface Tree {
+    object Leaf : Tree
+    data class Node(val left: Tree, val right: Tree) : Tree
+}
+
+// replaced with:
+
+class Node(...) 
+error Leaf
+typealias Tree = Node | Leaf
+
+// or even 
+
+error Leaf
+error Node(...)
+typealias Tree = Unit | Node | Leaf   
+```
+
+If we would like to handle these cases in some way we may introduce a new modifier `state` for errors
+that are expected to use as special values.
+
 ## References
 
 - [Marat's quip (April 11)](https://jetbrains.quip.com/fOg9A3IXwD4b/Restricted-union-types)
 - [Youtrack issue](https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors)
+
+## Future possibilities
+
+### Local error unions
+
+Local error type is an error defined in a specific scope.
+They express some exceptional state of the function/class that exists only in internal logic.
+They are expected not to leave it neither on the type level nor on the value level.
+They are declared in the same way as global errors but with visibility modifiers.
+
+```kotlin
+fun last() {
+   error NotFound
+}
+
+class C {
+   private error NotFound
+}
+```
+
+It is straightforward to control their scope on the type level as it is the same as for the common local classes.
+
+To track their scope on the value level, we declare them as not subtypes neither of `Error` nor of `Any`.
+But we leave them as a supertype of `Nothing`.
+Because of this, for every value that may contain this error, it has to be directly expressed in the type.
+Thus, if a type is not exposed out of the declared scope, the value is not exposed either.
+
+The issue with this approach is that we are not able to pass value with this error in any function.
+Even if we would like to have a private function expected to accept such value as an argument,
+we have to specify it explicitly.
+And if we would like for this function to optionally accept this error, we have to write such a boilerplate:
+```kotlin
+private error MyError
+
+private fun <T, LOCE : MyError> foo(v : T | LOCE): T | LOCE
+```
+As a result, any value with such errors has significantly limited usability.
+
+The main use-case of local errors is `last` function.
+It is possible to implement it using a common errors.
+If we just limit the scope of the error on the type-level (common private error)
+and developer will track that this error is not exposed outside the function.
+But with local errors, it is possible to guarantee the correctness of non-exposure on the type level.
+
+> Because of such limitedness of their applicability we may introduce another modifier (`local`) for local errors
+> and use `private` modifier in a same way as for classes.
+
+> To expand the applicability of this feature,
+> we may introduce a common supertype for all errors plus all errors local to the current scope.
+> F.e. `Error@last` which is a supertype of `Error` and errors local to class of `last` and `last` function itself.
+
+> TODO: discuss if this feature really needed.
+>
+> IMO it is too complicated, not so useful and does not align with the other language.
+
+### Richer type system for errors
+
+TODO: Exclusions
+
+TODO: more complex non-disjoint cases for variables (E1 : Error, E2 : DBError)
+
+TODO?: `Err(v)` representing errors of variable(argument) `v`
+
+TODO: `Int??` as a shorthand for `Int | Error` or `Int | $E`

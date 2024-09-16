@@ -885,3 +885,28 @@ fun foo (v: Int | MyError) {
     }
 }
 ```
+
+## August 28
+
+Agenda:
+- Read starting from a Proposal section
+- Do we want operations like exclusion for errors?
+- Do we want to have more complex non-disjoint cases for variables (E1 : Error, E2 : DBError)?
+- Local errors
+- Operators
+
+
+- ?: more elaboration much more
+  - What if null is a common value?
+  - How to handle both cases?
+- Do we want operations like exclusion for errors? Possibly, needs elaboration, but not a blocker
+- Do we want to have more complex non-disjoint cases for variables (E1 : Error, E2 : DBError)? Possibly, but not a blocker
+- Generic parameter for elvis to understand what filter out
+- Local errors: Not actually, not now
+
+## September 10 
+
+New ideas from capabilities:
+- `Int | Err(v)`, where `Err(v)` are errors from variable `v`
+- `Int??` (aka `^`) as a shorthand for `Int | E`
+
