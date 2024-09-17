@@ -193,6 +193,7 @@ The most similar feature to the proposed one is [error union types in Zig](https
 
 The broad overview of the feature is the following:
 - Error types are just tags without data, represented as integers at runtime.
+- Equal names implies equality of errors.
 - Arbitrary unions are allowed.
 - Allowed inference of error in return type. (But it is limited)
 - In debug mode, tracing of error bubbling is enabled.
@@ -226,7 +227,7 @@ they may be too complex to handle simple cases like function `last` or that user
 
 ### Approach
 
-We had a preliminary discussion about a design where errors have a separate hierarch with the same features as an existing classes.
+We had a preliminary discussion about a design where errors have a separate hierarchy with the same features as existing classes.
 This approach is directed by a goal "Let's add as many features as possible to remain errors inferrable".
 But this approach has several significant issues.
 

@@ -910,3 +910,19 @@ New ideas from capabilities:
 - `Int | Err(v)`, where `Err(v)` are errors from variable `v`
 - `Int??` (aka `^`) as a shorthand for `Int | E`
 
+## September 16
+
+- Examples of special values
+  - Except `NotInitialized`
+- Errors as enum abuse or not?
+
+## Meeting
+
+- `Null` is a special error
+  - TODO: rewrite keep with this choice
+- `?:` works only for errors, but we need a new operator for errors
+  - TODO: design operator or workaround 
+- Other operators work for both errors and values
+- Elaborate on type inference for this specific error `null` + backward compatible
+  - TODO: elaborate
+- `throw` operator function for bang bang operator for error
