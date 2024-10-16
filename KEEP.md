@@ -1,19 +1,19 @@
 # Union Types for Errors
 
+* **Type**: Design proposal
+* **Authors**: Roman Venediktov, Daniil Berezun
+* **Contributors**: Marat Akhin, Mikhail Zarechenskiy
+* **Status**: In research
+* **Related YouTrack issue**: [KT-68296](https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors)
+
+## Overview
+
+This KEEP introduces *union error types*,
+which allows for better handling of expected failure states for values and function results.
+
 ## Problem statement
 
-### Overview
-
-In this KEEP, we propose a new way of error-handling supported on the language level in Kotlin.
-It is expected to cover cases similar to those covered by `Either` in different languages.
-
-It is possible to express full-power `Either` in Kotlin using sealed classes.
-Moreover, there is already a `Result` class in the standard library 
-that have a similar purpose but limited to `Throwable` as errors.
-The advantage of the proposed feature over these approaches is 
-that it has better language support, flexibility and performance.
-
-### Covered use-cases
+### Motivation
 
 #### In-place tags
 
@@ -59,8 +59,6 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 It might be a bit shorter, but we still have to trick our type system by using the most common type `Any?` 
 and performing an unchecked cast at the end.
 
-##### Unions as tags
-
 Combining the ideas of tags and unions, the mentioned code could be rewritten as follows:
 
 ```kotlin
@@ -80,9 +78,7 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 
 Our functions work for all `T` and it doesn't have unchecked casts
 
-This code struggles with the same issues as were with `null`: 
-we do not have guarantees that `NotFound` will not be in the input sequence.
-To avoid this we may declare `NotFound` private to `last` function and does not expose it outside:
+To make this function fully correct, we have to prevent `NotFound` from leaking outside the function:
 
 ```kotlin
 inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
@@ -99,10 +95,6 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 }
 ```
 
-It is still possible that `NotFound` will leak due to programmer's mistake, 
-but for now it depends only on the developer of the function, not on the function's users.
-But it may be useful to provide a type level guarantee that `NotFound` will not leak outside the function. 
-
 #### ...OrThrow / ...OrNull
 
 It's quite common to encounter functions that describe part of their effects for error cases in their names.
@@ -113,9 +105,7 @@ A typical example could be our functions `maxOf`
 ([code](https://github.com/JetBrains/kotlin/blob/0938b46726b9c6938df309098316ce741815bb55/libraries/stdlib/common/src/generated/_Arrays.kt#L14700)) 
 where many functions are duplicated to have `maxOfOrNull` counterpart in case of empty collections.
 
-##### Moving unions to return types
-
-With the error union types, it could be possible to define one method that can encode all the necessary error cases:
+With the error union types, it is possible to define one method that can encode all the necessary error cases:
 
 ```kotlin
 // getOrThrow -> get
@@ -128,29 +118,8 @@ fun IntArray.max(): Int | NoSuchElement
 fun <T> awaitSingle(): T | NoSuchElement
 ```
 
-However, to make the pattern shine in Kotlin, 
-it is essential to provide deconstruction operators for such unions at call-sites.
-
-This is where our presentation of unions as 'main' or 'extras' also works well
-We can consider operators `??.` (to compound errors on the left side) 
-and `??:` (elvis analogue, to evaluate RHS if there is an error)
-
-<!---
-### Issue categories
-
-1. Internal errors.
-   In this case, we would like to have a special error state that is local to the current function/class(/package?)
-   Example of such a function is `last`.
-   These states are expected to express some internal states and do not be exposed outside the scope.
-   Not as types but as values as well.
-   So this function/class is able to rely on the fact that this error will not be in the input parameters or anywhere else.
-2. External errors.
-   In this case, we would like to express exceptional states that could happen in the function/class.
-   The example of this use-case are functions in stdlib with several overloads (`OrNull` vs `OrThrow`).
-   The desired output of this feature is to unify them in a single function which could be easily handled in both manners.
-   More precisely, it has to be easily transformed into exception 
-   and easily postponed to handle using language features like conditional call and elvis operator.
--->
+And programmer is able at the call-site 
+transform them into sound exceptions using `!!` operator or process them in any way.
 
 ### Background
 
@@ -179,9 +148,9 @@ when (result) {
 
 It is possible to implement `Either` on the language level with the same operators as proposed for error unions.
 But this approach has several disadvantages:
-- `Either` with several errors is sensitive to the structure and order:
+- Composition of `Either` is sensitive to the structure and order:
   `Either<A, Either<B, C>>` is not the same as `Either<Either<A, B>, C>` or `Either<B, Either<A, C>>`.
-  Which may lead to complications for code refactoring or reordering.
+  Which may lead to complications for subtyping and code refactoring or reordering.
 - Error type in `Either` is a common type in a Kotlin type system.
   Consequently, if you would like to have several possible errors, you have to create a sealed hierarchy for them.
   And you will not be able to return a subset of this hierarchy by handling only a part of errors.
@@ -194,8 +163,8 @@ The most similar feature to the proposed one is [error union types in Zig](https
 The broad overview of the feature is the following:
 - Error types are just tags without data, represented as integers at runtime.
 - Equal names implies equality of errors.
-- Arbitrary unions are allowed.
-- Allowed inference of error in return type. (But it is limited)
+- Arbitrary error unions are allowed.
+- Allowed inference of error in return type.
 - In debug mode, tracing of error bubbling is enabled.
 
 #### Effects as error handling
@@ -213,7 +182,7 @@ They may even be implemented in Kotlin in future using coroutines and context pa
 The good example of their adoption for OO language is [Scala's capabilities](https://docs.scala-lang.org/scala3/reference/experimental/cc.html).
 
 But we state that their use-cases are different from the proposed feature.
-While they are great to track some io interactions and more complex exceptions, 
+While they are great to track some IO interactions and unrecoverable exceptions, 
 they may be too complex to handle simple cases like function `last` or that user's age is not in the range.
 
 ### Goals
@@ -226,6 +195,8 @@ they may be too complex to handle simple cases like function `last` or that user
 ## Proposal
 
 ### Approach
+
+TODO: rewrite & move
 
 We had a preliminary discussion about a design where errors have a separate hierarchy with the same features as existing classes.
 This approach is directed by a goal "Let's add as many features as possible to remain errors inferrable".
@@ -308,7 +279,7 @@ With this approach, we do not allow for error types:
     So typealias is even more semantically sound for errors.
     In an extra cases where it is required, typealias + extension function is all you need.
 
-### Design overview
+### Type syntax
 
 Error type is a separate type kind, which is declared using a soft keyword `error`.
 
@@ -316,20 +287,7 @@ Error type is a separate type kind, which is declared using a soft keyword `erro
 error class MyError(val code: Int)
 ```
 
-> There is an approach where an error type could be declared in-place using different syntax.
-> For example:
-> ```kotlin
-> fun foo(): Int | `MyError
-> // or
-> fun foo(): Int | `MyError(Int)
-> ```
->
-> But this approach looks worse than the proposed one.
-> - Firstly, it does not align with the existing Kotlin style
-> - Secondly, it does not allow making declaration-site optimizations
-> - Finally, it allows clashing errors from different libraries. Which is not expected in 99% of cases.
-
-Error type may not have any supertypes (use delegation instead)
+Error type may not have any supertypes
 other than new common supertype for all of them, `Error`.
 We are also introducing new type `Value` which is a supertype for all non-error types.
 The resulting subtype hierarchy between those types is the following:
@@ -337,6 +295,19 @@ The resulting subtype hierarchy between those types is the following:
 2. `Value :> Int`, `Value :> String`, etc.
 3. `Error :> MyError`, `Error :> ConnectionError`, etc.
 4. `MyError :> Nothing`, `ConnectionError :> Nothing`, etc.
+
+> TODO: Discuss: 
+> 
+> IMO we should name `Any` as a supertype for all values and `Ref` (name is really problematic) as a supertype for everything.
+> Cons:
+> - in cases `fun <T> foo(t: T): T & Any` programmer means that `T & Any` is a value without any other states (like `null` before)
+> - The same in cases like `class C(val v: Any)` it does not accept any error before (only null existed), 
+>   why should it start accepting null or any other error now?
+> - So it is a requirement of backward compatibility
+> 
+> We may not introduce a supertype for Any, but introduce a syntax `Any??` for `Any | Error`.
+> 
+> TODO: existing `Any?` usages which expected to be able to assiged to any value. 
 
 These types may be used in a union with common type:
 
@@ -360,341 +331,229 @@ Limitations on those types:
       arg6: T | E1, // not allowed as error component of T and E1 are not disjoint
    )
    ```
-
-We should add the same conditional call and elvis operators for error unions as for nullable types.
-For example:
-
-```kotlin
-val a: Int | MyError = foo()
-val b = a ??: 0
-val c = a??.toString()
-```
-
-To destruct error union, common `when` expression may be utilized:
-
-```kotlin
-fun foo(val content: String | ConnectionError | DbError): Int? | OtherError =
-    when (content) {
-        is String -> content.toInt() ??: OtherError
-        is ConnectionError -> OtherError
-        is DbError -> null
-    }
-```
-
-To get a value from the error, you have to
-- (smart-)cast it to specific error
-- Then it is possible to use classic field reference or destructuring syntax as for common data classes:
-
-```kotlin
-error NetworkError(val code: Int, val message: String)
-
-fun foo() {
-    val v: Json | NetworkError = request()
-    if (v is NetworkError) {
-        val (code, message) = v
-        // or
-        val code = v.code
-    }
-}
-```
-
-> Due to another kind of errors it is possible to allow call `.code` 
-> if we have union of errors where each error have `code` field.
-> But it requires additional investigation.
-
-To allow easily transform `errors` into exceptions or null, we may introduce a new functions:
-    
-```kotlin
-fun <T> (T | Error).orThrow() {
-    contract { returns() implies (this !is Error) }
-    // ...
-}
-
-fun <T> (T | Error).orNull(): T? {
-    // ...
-}
-```
+   
+> Actually, any limitations other than first one are consequences of the inference algorithm.
+> TODO: review the algorithm, formalize requirement better, check for forward compatibility
 
 ### Relation with `null`
 
-The problem of `null` is that it is currently used both as a special value and as an error.
-Are these cases really different?
-As we are introducing a special construction for errors, what is the future of `null`?
+`null` is another special value which is typed orthogonal to class hierarchy.
+There already exists a special handling like smart casts, operators and not-null generic types.
+If we would like to have these two features separately, 
+we have to introduce whole new machinery not only in the compiler but also in the syntax.
+It leads to different safe call operators for `null` and for errors.
+What if we would like to make a safe call that filters out only errors, only nulls or both?
+To cover all of these cases and all possible future interactions,
+we have to cover quadratic number of operators and features.
 
-Firstly, let's answer the question: Are we really interested in this division?
-At first sight, it may affect how user handles errors and special values.
-- Errors may be:
-  - Processed with different logic.
-    For example, display different messages for user or try to silently refresh the token in case of network error.
-    Required language support: `when` expression.
-  - Processed with simple same logic.
-    For example, pass to logger, replace with default value, return them or throw an exception.
-    Required language support: elvis operator + `orThrow`, `asException`, `check`, `require` functions + `!!` operator.
-  - Processed with complex same logic.
-    For example, restore state or retry the operation.
-    Required language support: `is Error` condition for `if` expression.
-  - Accumulated by different calls to be bunch-processed later.
-    To not process them into C-style error codes.
-    Required language support: safe call operator.
-  - TODO...
-- Special values may be:
-  - Processed with different logic.
-    Required language support: `when` expression.
-  - Replaced with default value (are they actually a value in this case?).
-    Required language support: elvis operator.
+While actually, `null` is mostly used as an error and even if it is used as optional value,
+ideas of optional and either are quite similar.
+So we decide to merge these two features into one:
+- `null` is become a special value of type `error object Null`.
+- `T?` is become a syntax sugar for `T | Null`.
+- `?.`, `!!`, `?:` becomes an operators for errors
 
-As a result, we are interested in this division because special values do not require any special language support.
-While errors require that all mentioned operators applied only to errors, not to special values.
-For example, if we consider `null` as a special value, we have to have an operator that filters out only errors.
+This change is backward compatible, as behavior is not changed for current code.
+There is simple translation from nullable types to error unions with only one error, `Null`.
 
-Secondly, let's iterate over all nine possibilities of error design and relation to `null`:
+### Operating with errors
 
-|                              | Errors are only errors | Errors explicitly divided into errors and states | Errors implicitly divided into errors and states |
-|------------------------------|------------------------|--------------------------------------------------|--------------------------------------------------|
-| `null` is only error         | 3                      | 1.1.1                                            | 1.2                                              |
-| `null` is only special value | 2.1                    | 1.1.2                                            | 1.2                                              |
-| `null` is both               | 2.2                    | 1.1.3                                            | 1.2                                              |
-
-Numbers are references to the elaboration of the combinations.
-
-Elaboration of single choices:
-- "`null` is only error".
-  In this case, we consider:
-  - Users should use `null` in cases function may fail, and they do not care about the reason.
-  - Users should not use `null` as a built-in `Optional`.
-  
-  Consequences:
-  -  `null` have to be deprecated in favor of error `Null`.
-     Because if it is only an error, it is better to merge the two concepts.
-  -  It sounds impossible as it means that we have to push all the users to rewrite their code with `Optional`
-- "`null` is only special value".
-  In this case, we consider:
-  - Users should use `null` only as a built-in `Optional`.
-  - Users should not use `null` as an error in favor of explicit and more informative errors. 
-    Or just `T | Failure` if they do not care about the reason.
-  
-  Consequences:
-  - We have to have separate operators for `null` and errors.
-    As they have to exist for `null` due to backward compatibility and for errors due to the feature requirements.
-  - We have to push users to rewrite their code where `null` is used as an error.
-    Which is ok as it is actually why we are introducing this feature,
-    and it is easy to do as they will have a backward compatible operators.
-- "`null` is both".
-  In this case we consider users should use `null` in any case they want.
-- Errors are only errors.
-  In this case, we consider that errors are used only as errors.
-  And any case and issue where they are used as special values should be considered as a bad design and ignored.
-- Errors explicitly divided into errors and states.
-  In this case, we consider that errors are used both as errors and as special values, 
-  and it is implemented on the language level.
-  For example:
-  ```kotlin
-  error NetworkError(val code: Int, val message: String)
-  state NoValue
-  
-  fun request(): Int | NoValue | NetworkError
-  ```
-  
-  Consequences:
-  - We have to filter out only errors in the operators.
-  - Unpredictable behavior for the constructs that looks similar.
-  - Looks alien to the OO-language design.
-- Errors implicitly divided into errors and states.
-  In this case, we consider that errors are used both as errors and as special values, 
-  but it is not implemented on the language level.
-  For example:
-  ```kotlin
-  error NetworkError(val code: Int, val message: String)
-  error NoValue
-  
-  fun request(): Int | NoValue | NetworkError
-  ```
-  
-  Consequences:
-  - We should allow user to choose what to filter out in this specific case.
-  - We have to cover some cases that may be considered as a bad design for OO-language.
-
-Let's review the combinations on a specific example.
-We have a function `request` that may return `Optional<Int>` or `NetworkErrors` 
-(`NetworkErrors` should be considered as a typealias on several errors).
-Which return type is expected?
-
-1. ```kotlin
-   fun request(): Int | NoValue | NetworkErrors
-   ```
-   In this case, errors are used both as special values and as errors.
-   If we see this as an expected design, we state that errors may be used anywhere as a special value.
-   And there may be more than one special value (f.e. `Int | Uninitialized | NoValue`).
-   Whether this "error" is an error or special value may be determined on the declaration-site or use-site.
-   
-   1. Declaration-site.
-      In this case we have to introduce a new modifier `state` for errors that are used as special values.
-      ```kotlin
-      error class NetworkError(val code: Int, val message: String)
-      state class NoValue
-      ```
-      We also have to have an operator that filters out only errors.
-      1. If `null` is considered as an error, we may re-use the same operators as for nullable types.
-      2. If `null` is considered as a special value, we have to introduce a new operators.
-      3. If `null` is considered as both, we are:
-         - not able to transform `null` into `Null`.
-         - have to introduce a new operators.
-         - have to allow merging operators for errors and null concisely.
-           For cases where null is used as an error.
-
-         So this case looks strictly worse than any other.
-   2. Use-site.
-      In this case, we have to allow user to choose what is considered as an error in this context.
-      To allow this, we have to add a new generic parameter for operators.
-      ```kotlin
-      val v = request() ?:<NetworkErrors> return
-      val v = request()?.<NetworkErrors>process()
-      val v = request()!!<NetworkErrors>
-      ```
-      > It may be called as "Sad Elvis operator".
-   
-      In this case null could be unconditionally transformed into `Null` and user will decide what to filter out.
-
-   Consequences:
-   1. We should deprecate `null` in favor of error `Null`.
-     It will force people to use more sound names for errors in their cases and leave `Null` only for legacy and Java/JVM interop.
-
-   Advantages:
-   1. No `null`.
-   2. Less syntactic categories, no different (but similar) handling of `null` and errors in compiler and programmer's mind.
-   
-   Disadvantages:
-   1. It looks alien to the OO language design.
-   2. It may be harder to design `Error` typing to be comfortable for both errors and special values. TODO: reflect on this.
-2. ```kotlin
-   fun request(): Int? | NetworkErrors
-   ```
-   This case is divided into two:
-   1. `null` is used only as a special value.
-      Errors are used only as errors.
-      
-      Consequences:
-      1. We do not consider `null` as error in our design.
-         (Only in terms of backward compatibility)
-      2. We disallow any future view on `null` as an error `Null`.
-      3. Theoretically, it is possible to change the semantics of operators for `null` into operators for errors and do not introduce new operators.
-
-      Advantages:
-      1. No significant changes in the language.
-      2. Overhead-less optional for JVM in composition with errors
-   
-      Disadvantages:
-      1. `null` exists.
-      2. `null` is too similar to errors but different.
-         People may continue to use it as an error and report something as a bad design.
-      3. Different operators for `null` and errors.
-         More complicated syntax.
-      4. After release of project Valhalla, there will be another overhead-less `Optional` in the language.
-         (But it will have an overhead if it is mixed with errors)
-   2. `null` is allowed to be used as both.
-      It is mostly the same as the previous case.
-      Differences:
-      - We have to add an operator that filters both nulls and errors.
-        Otherwise, we state that if you used `null` as an error, you do not have any operators.
-        It is bad and easier to just consider option where null is only a special value.
-      - It is not possible to change the semantics of operators for `null` into operators for errors.
-3. ```kotlin
-   fun request(): Optional<Int> | NetworkErrors
-   ```
-   In this case, we consider users should design hierarchy for values.
-   Errors are used only as errors and named properly.
-   `null` is used as a specific error `Null`. 
-
-   Consequences:
-   1. We should deprecate `null` in favor of error `Null`.
-   2. Operators could be easily re-used from nullable types.
-   
-   Advantages:
-   1. No `null`
-   2. Less syntactic categories, no different (but similar) handling of `null` and errors in compiler and programmer's mind.
-   
-   Disadvantages:
-   1. Requires more letters to better design the value hierarchy.
-   2. No overhead-less optional for JVM.
-   3. Users may continue to use null for optional and do not use errors at all.
-   
-TODO: more advantages and disadvantages
-TODO: formatting (numbering only for suboptions)
-TODO: discuss
-
-> IMO we should go for the option 2.1
-> Thus, `null` has to be considered only as a special value, and errors are only as errors.
-> Use-cases where `null` is used as error or errors as special values we should consider as bad design 
-> and do not cover them.
-
-### New operators
-
-To make the feature more usable, we have to introduce the same operators as for nullable types.
-The simple idea is to replicate them with the same semantics:
-- `??.` -- conditional call
-- `??:` -- elvis operator
-- `?!!` -- force operator
-
-Or we may introduce a new symbol for errors to make operators shorter: `#.`, `#:`, `#!!`/`##`/`#!`.
-
-As we consider null as a special value, we may ignore cases where user would like to filter both nulls and errors.
-This is because it is intended to be a different operations, 
-thus happen together in rare cases where two consecutive operators represent two different operations.
-For example:
+The most straightforward way to destruct error union is to use `when` expression:
 
 ```kotlin
-val v = foo() ??: return
-              ?: return
+fun foo(val content: String | ConnectionError | DbError) =
+    when (content) {
+        is String -> response(content)
+        is ConnectionError -> {
+            // Here content is smart-casted to ConnectionError
+            // So you can access its properties
+            logger.error("Connection error: ${content.code}")
+        }
+        is DbError -> logger.error("DB error: ${content.message}")
+    }
 ```
 
-This code is either a bad design because `foo` should use one more error that is hidden under `null`.
-Or it is a good code that just does the same operations in case of two totally different cases 
-(error happens in `foo` or `foo` returned `Optional.None` aka `null`).
+> TODO: there is some issue with refering to `DbError` with name content.
+> Maybe it is reason why other languages introduce two return values for error and value.
+> IMO to store them in a single value much better, but maybe we need a syntax for creating a new name or inplace destruction could be enough.
+> ```kotlin
+> fun foo(val content: String | ConnectionError | DbError) =
+>     when (content) {
+>         is String -> response(content)
+>         is err: ConnectionError -> logger.error("Connection error: ${err.code}")
+>         is DbError(message) -> logger.error("DB error: ${message}")
+>     }
+> ```
+> This issue is close to pattern matching
 
-Safe call on both nulls and errors is not possible,
-but if you use `T?` as optional value, then your function should get `T?` as a receiver.
-Thus, the cases where it is required may be considered as a bad design.
+To not check for error after each call as in C, there are several operators: 
 
-#### More new operators
+- Safe call operator. `?.`
+  
+  Now it expands into the following:
+  ```kotlin
+  val v2 = v1?.foo()
+  // expands into
+  val v2 = if (v1 is Error) v1 else v1.foo()
+  ```
+  
+  So the errors in `v2` is a union of errors in `v1` and errors in `foo()`.
+- Bang-bang operator. `!!`
+  
+  Now it expands into the following:
+  ```kotlin
+  val v2 = v1!!
+  // expands into
+  val v2 = 
+    if (v1 is Error) {
+      throw ErrorException(v1)
+    } else {
+      v1
+    }
+  ```
+- Elvis operator. `?:`
+  
+  It would be consistent to expand it into the following:
+  ```kotlin
+  val v2 = v1 ?: v3
+  // expands into
+  val v2 = if (v1 is Error) v3 else v1
+  ```
+  
+  But the issue there is that errors will be aggressively swallowed.
+  For instance, if a library introduces a new error, 
+  all the previous code will silently continue to work, while it may not be expected.
+  While good design here should imply a compilation error, which forces programmer to handle new error.
+  
+  So, it is decided to make it equivalent to function `elvis`, defined as follows:
+  ```kotlin
+  fun <T : Value, E : Error> elvis(v1: T | Null, v3: T | E): T | E = if (v1 is Null) v3 else v1
+  ```
+  So, elvis operator will be applicable only for values where there are only `Null` error.
+  
+  > TODO: in Zig it is swallowing: https://ziglang.org/documentation/master/#catch
+  > 
+  > TODO: discuss if we should filter out null even if there are other errors.
+  > 
+  > TODO: discuss if it encourages usage of `Null` instead of meaningful errors.
+  > 
+  > TODO: Maybe we should filter out any single error in elvis operator? (what about typealias?)
 
-If we want to continue considering null as both a special value and an error.
-Then we should cover cases considered as a bad design in the previous section.
-Thus, we have to introduce operators that filter out both nulls and errors.
-They may look like:
-- `???.`, `???:`, `??!!`
-- `#?.`, `#?:`, `##!!`
+#### New operator
 
-<!--
+TODO: discuss section
 
-#### No new operators
-
-If we consider option where no new operators required, the only problem is functions like this:
+It is fine to apply all existing operators to errors, but with errors we may often encounter the following pattern:
 
 ```kotlin
-fun <T : Any> containsNulls(l: List<T?>): Boolean {
-   l.forEach { it ?: return true }
-   return false
+val v = when (val tmp = foo()) {
+    is NetworkError -> TODO("Some code")
+    is DbError | CacheError -> TODO("Some other code")
+    is Error -> tmp // or `throw tmp`
+    else -> tmp // Value
 }
 ```
 
-Yes, this function is not written well, but it may exist and user may expect that it will work as written.
+It may be quite useful to introduce a syntax sugar over this pattern.
+It is quite complex to find a good syntax for it.
+Some options:
 
--->
-
-### Difference between class and object
-
-TODO: discuss do we want to separate `error object` and `error class` or not.
-
-> I propose not to introduce `error object` and have only `error class`, 
-> which is optimized to unique if they do not have data.
-
-We are able to transform errors without data into unique constants even without `object` keyword.
-Shouldn't we leave it on the optimization level?
-It will allow users to write errors easier as they do not have to think about the choice between `object` and `class`.
-
-### Error unions as types for compilation phases
-
-TODO: to filter impossible ancestors or states
+- No changes in language, just auxiliary function(s).
+  Suboptions:
+  - ```kotlin
+    val v = foo()
+        .on<NetworkError> { TODO("Some code") }
+        .on<DbError | CacheError> { TODO("Some other code") }
+    ```
+- No new syntax, just bind error in a new variable in elvis operator.
+  Suboptions: 
+  - Implicitly introduce a new variable with name `it` (or `err`).
+    ```kotlin
+    val v = foo() ?: when (it) {
+        is NetworkError -> 0
+        is DbError -> 1
+        else -> throw it // or err
+    }
+    ```
+    - Backward compatibility issue: there may be existing variables with name `it` or `err`.
+    - Issue: no possibility to use another name.
+  - Explicitly introduce a new variable.
+    Possible syntaxes:
+    - ```kotlin
+      val v = foo() ?: when (val e) {
+          is NetworkError -> 0
+          is DbError -> 1
+          else -> throw e
+      }
+      ```
+    - ```kotlin
+      val v = foo() ?: e -> when (e) {
+          is NetworkError -> 0
+          is DbError -> 1
+          else -> throw e
+      }
+      ```
+- New elvis-like operator that binds variable.
+  ```kotlin
+  val v = foo() ?| when (err) {
+      is NetworkError -> 0
+      is DbError -> 1
+      else -> throw err // or it
+  }
+  ```
+  ```kotlin
+  val v = foo() ?| e -> when (e) {
+      is NetworkError -> 0
+      is DbError -> 1
+      else -> throw e
+  }
+  ```
+- Totally new operator to remove `when` subexpression.
+    Suboptions:
+    - ```kotlin
+      val v = foo() ? { e ->
+          is NetworkError -> 0
+          is DbError -> 1
+          else -> throw it
+      }
+      ```
+    - ```kotlin
+      val v = foo() ?| { e ->
+          is NetworkError -> 0
+          is DbError -> 1
+          else -> throw it
+      }
+      ```
+    - ```kotlin
+      val v = foo() ?when (val e) {
+          is NetworkError -> 0
+          is DbError -> 1
+          else -> throw it
+      }
+      ```
+  - ```kotlin
+        val v = foo() ?! when {
+            is NetworkError -> 0
+            is DbError -> 1
+            else -> throw it
+        }
+        ```
+    - ```kotlin
+        val v = foo() !! {
+            is NetworkError -> 0
+            is DbError -> 1
+        }
+        ```
+    - ```kotlin
+        val v = foo() !! when {
+            is NetworkError -> 0
+            is DbError -> 1
+            else -> throw it
+        }
+        ```
+    
+> We think that word `catch` should not be used as it is already used for exceptions.
+> And we should not create mental relation between them.
 
 ### Runtime representation
 
@@ -722,7 +581,7 @@ With this approach and declaration of the error could be transformed into:
   This case is actually transformed into "Another special value for reference with the performance comparable to null."
 - For errors with data: constructing function or nothing if we would like to construct them in-place.
 
-### Inference
+### Typing
 
 #### Types
 
@@ -738,8 +597,8 @@ With this approach and declaration of the error could be transformed into:
   > It means that errors may have forms:
   > - List of explicitly written error constants (further denoted as `Errs`)
   > - `E | Errs`, where E is an unbounded error variable
-  > - `E1 | E2 | E3 | Errs`, where `E1` and `E2` and `E3` are disjoint error variables.
-      >   F.e. DbErrors, NetworkErrors, and CacheErrors
+  > - `E1 | E2 | E3 | Errs`, where `E1` and `E2` and `E3` are error variables with disjoint upper bounds.
+      F.e. DbErrors, NetworkErrors, and CacheErrors
 - Constants in `B` are disjoint
 
 #### Operations
@@ -790,6 +649,10 @@ Possible solutions:
   we will infer the smallest possible sets satisfying all lower-bounding constraints.
   Then we may just check if the resulting type is a subtype of the expected type and provide a message if not.
 
+#### Backward compatibility with nullability
+
+TODO: review mapping, consider corner cases
+
 ### Relation to other features
 
 #### Smart casts
@@ -831,7 +694,7 @@ We have to exclude the checked type from the union
 > On the contrary, if we have something like:
 > ```kotlin
 > val t: T
-> t ??: return
+> t!!
 > ```
 > We should smart-cast `t` to `T & Value`
 
@@ -872,15 +735,18 @@ error Node(...)
 typealias Tree = Unit | Node | Leaf   
 ```
 
-If we would like to handle these cases in some way we may introduce a new modifier `state` for errors
-that are expected to use as special values.
+All these cases are considered as a misuse of the feature.
+It looks impossible and impractical to prevent them so we have to rely on the developer's discipline.
 
 ## References
 
 - [Marat's quip (April 11)](https://jetbrains.quip.com/fOg9A3IXwD4b/Restricted-union-types)
-- [Youtrack issue](https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors)
 
 ## Future possibilities
+
+### Origin of errors
+
+TODO: it is possible to bubble errors if they were called with some specific modifier?
 
 ### Local error unions
 

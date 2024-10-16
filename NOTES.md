@@ -920,9 +920,229 @@ New ideas from capabilities:
 
 - `Null` is a special error
   - TODO: rewrite keep with this choice
-- `?:` works only for errors, but we need a new operator for errors
+- `?:` works only for null, but we need a new operator for errors
   - TODO: design operator or workaround 
 - Other operators work for both errors and values
 - Elaborate on type inference for this specific error `null` + backward compatible
   - TODO: elaborate
 - `throw` operator function for bang bang operator for error
+
+## Backup of an idea of another approach
+
+> There is an approach where an error type could be declared in-place using different syntax.
+> For example:
+> ```kotlin
+> fun foo(): Int | `MyError
+> // or
+> fun foo(): Int | `MyError(Int)
+> ```
+>
+> But this approach looks worse than the proposed one.
+> - Firstly, it does not align with the existing Kotlin style
+> - Secondly, it does not allow making declaration-site optimizations
+> - Finally, it allows clashing errors from different libraries. Which is not expected in 99% of cases.
+
+## Discussion about relation between null and errors
+
+### Relation with `null`
+
+The problem of `null` is that it is currently used both as a special value and as an error.
+Are these cases really different?
+As we are introducing a special construction for errors, what is the future of `null`?
+
+Firstly, let's answer the question: Are we really interested in this division?
+At first sight, it may affect how user handles errors and special values.
+- Errors may be:
+    - Processed with different logic.
+      For example, display different messages for user or try to silently refresh the token in case of network error.
+      Required language support: `when` expression.
+    - Processed with simple same logic.
+      For example, pass to logger, replace with default value, return them or throw an exception.
+      Required language support: elvis operator + `orThrow`, `asException`, `check`, `require` functions + `!!` operator.
+    - Processed with complex same logic.
+      For example, restore state or retry the operation.
+      Required language support: `is Error` condition for `if` expression.
+    - Accumulated by different calls to be bunch-processed later.
+      To not process them into C-style error codes.
+      Required language support: safe call operator.
+    - TODO...
+- Special values may be:
+    - Processed with different logic.
+      Required language support: `when` expression.
+    - Replaced with default value (are they actually a value in this case?).
+      Required language support: elvis operator.
+
+As a result, we are interested in this division because special values do not require any special language support.
+While errors require that all mentioned operators applied only to errors, not to special values.
+For example, if we consider `null` as a special value, we have to have an operator that filters out only errors.
+
+Secondly, let's iterate over all nine possibilities of error design and relation to `null`:
+
+|                              | Errors are only errors | Errors explicitly divided into errors and states | Errors implicitly divided into errors and states |
+|------------------------------|------------------------|--------------------------------------------------|--------------------------------------------------|
+| `null` is only error         | 3                      | 1.1.1                                            | 1.2                                              |
+| `null` is only special value | 2.1                    | 1.1.2                                            | 1.2                                              |
+| `null` is both               | 2.2                    | 1.1.3                                            | 1.2                                              |
+
+Numbers are references to the elaboration of the combinations.
+
+Elaboration of single choices:
+- "`null` is only error".
+  In this case, we consider:
+    - Users should use `null` in cases function may fail, and they do not care about the reason.
+    - Users should not use `null` as a built-in `Optional`.
+
+  Consequences:
+    -  `null` have to be deprecated in favor of error `Null`.
+       Because if it is only an error, it is better to merge the two concepts.
+    -  It sounds impossible as it means that we have to push all the users to rewrite their code with `Optional`
+- "`null` is only special value".
+  In this case, we consider:
+    - Users should use `null` only as a built-in `Optional`.
+    - Users should not use `null` as an error in favor of explicit and more informative errors.
+      Or just `T | Failure` if they do not care about the reason.
+
+  Consequences:
+    - We have to have separate operators for `null` and errors.
+      As they have to exist for `null` due to backward compatibility and for errors due to the feature requirements.
+    - We have to push users to rewrite their code where `null` is used as an error.
+      Which is ok as it is actually why we are introducing this feature,
+      and it is easy to do as they will have a backward compatible operators.
+- "`null` is both".
+  In this case we consider users should use `null` in any case they want.
+- Errors are only errors.
+  In this case, we consider that errors are used only as errors.
+  And any case and issue where they are used as special values should be considered as a bad design and ignored.
+- Errors explicitly divided into errors and states.
+  In this case, we consider that errors are used both as errors and as special values,
+  and it is implemented on the language level.
+  For example:
+  ```kotlin
+  error NetworkError(val code: Int, val message: String)
+  state NoValue
+  
+  fun request(): Int | NoValue | NetworkError
+  ```
+
+  Consequences:
+    - We have to filter out only errors in the operators.
+    - Unpredictable behavior for the constructs that looks similar.
+    - Looks alien to the OO-language design.
+- Errors implicitly divided into errors and states.
+  In this case, we consider that errors are used both as errors and as special values,
+  but it is not implemented on the language level.
+  For example:
+  ```kotlin
+  error NetworkError(val code: Int, val message: String)
+  error NoValue
+  
+  fun request(): Int | NoValue | NetworkError
+  ```
+
+  Consequences:
+    - We should allow user to choose what to filter out in this specific case.
+    - We have to cover some cases that may be considered as a bad design for OO-language.
+
+Let's review the combinations on a specific example.
+We have a function `request` that may return `Optional<Int>` or `NetworkErrors`
+(`NetworkErrors` should be considered as a typealias on several errors).
+Which return type is expected?
+
+1. ```kotlin
+   fun request(): Int | NoValue | NetworkErrors
+   ```
+   In this case, errors are used both as special values and as errors.
+   If we see this as an expected design, we state that errors may be used anywhere as a special value.
+   And there may be more than one special value (f.e. `Int | Uninitialized | NoValue`).
+   Whether this "error" is an error or special value may be determined on the declaration-site or use-site.
+
+    1. Declaration-site.
+       In this case we have to introduce a new modifier `state` for errors that are used as special values.
+       ```kotlin
+       error class NetworkError(val code: Int, val message: String)
+       state class NoValue
+       ```
+       We also have to have an operator that filters out only errors.
+        1. If `null` is considered as an error, we may re-use the same operators as for nullable types.
+        2. If `null` is considered as a special value, we have to introduce a new operators.
+        3. If `null` is considered as both, we are:
+            - not able to transform `null` into `Null`.
+            - have to introduce a new operators.
+            - have to allow merging operators for errors and null concisely.
+              For cases where null is used as an error.
+
+           So this case looks strictly worse than any other.
+    2. Use-site.
+       In this case, we have to allow user to choose what is considered as an error in this context.
+       To allow this, we have to add a new generic parameter for operators.
+       ```kotlin
+       val v = request() ?:<NetworkErrors> return
+       val v = request()?.<NetworkErrors>process()
+       val v = request()!!<NetworkErrors>
+       ```
+       > It may be called as "Sad Elvis operator".
+
+       In this case null could be unconditionally transformed into `Null` and user will decide what to filter out.
+
+   Consequences:
+    1. We should deprecate `null` in favor of error `Null`.
+       It will force people to use more sound names for errors in their cases and leave `Null` only for legacy and Java/JVM interop.
+
+   Advantages:
+    1. No `null`.
+    2. Less syntactic categories, no different (but similar) handling of `null` and errors in compiler and programmer's mind.
+
+   Disadvantages:
+    1. It looks alien to the OO language design.
+    2. It may be harder to design `Error` typing to be comfortable for both errors and special values. TODO: reflect on this.
+2. ```kotlin
+   fun request(): Int? | NetworkErrors
+   ```
+   This case is divided into two:
+    1. `null` is used only as a special value.
+       Errors are used only as errors.
+
+       Consequences:
+        1. We do not consider `null` as error in our design.
+           (Only in terms of backward compatibility)
+        2. We disallow any future view on `null` as an error `Null`.
+        3. Theoretically, it is possible to change the semantics of operators for `null` into operators for errors and do not introduce new operators.
+
+       Advantages:
+        1. No significant changes in the language.
+        2. Overhead-less optional for JVM in composition with errors
+
+       Disadvantages:
+        1. `null` exists.
+        2. `null` is too similar to errors but different.
+           People may continue to use it as an error and report something as a bad design.
+        3. Different operators for `null` and errors.
+           More complicated syntax.
+        4. After release of project Valhalla, there will be another overhead-less `Optional` in the language.
+           (But it will have an overhead if it is mixed with errors)
+    2. `null` is allowed to be used as both.
+       It is mostly the same as the previous case.
+       Differences:
+        - We have to add an operator that filters both nulls and errors.
+          Otherwise, we state that if you used `null` as an error, you do not have any operators.
+          It is bad and easier to just consider option where null is only a special value.
+        - It is not possible to change the semantics of operators for `null` into operators for errors.
+3. ```kotlin
+   fun request(): Optional<Int> | NetworkErrors
+   ```
+   In this case, we consider users should design hierarchy for values.
+   Errors are used only as errors and named properly.
+   `null` is used as a specific error `Null`.
+
+   Consequences:
+    1. We should deprecate `null` in favor of error `Null`.
+    2. Operators could be easily re-used from nullable types.
+
+   Advantages:
+    1. No `null`
+    2. Less syntactic categories, no different (but similar) handling of `null` and errors in compiler and programmer's mind.
+
+   Disadvantages:
+    1. Requires more letters to better design the value hierarchy.
+    2. No overhead-less optional for JVM.
+    3. Users may continue to use null for optional and do not use errors at all.
