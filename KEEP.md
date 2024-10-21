@@ -15,9 +15,58 @@ which allows for better handling of expected failure states for values and funct
 
 ### Motivation
 
+#### ...OrThrow / ...OrNull
+
+> TODO: discuss: What is the issue with only `orNull` version and !! usage? To agree on this requires for better understanding on expected conversions of errors to exceptions.
+
+It's quite common to encounter functions that describe part of their effects for error cases in their names.
+A typical example could be functions `maxOf` from the standard library
+([code](https://github.com/JetBrains/kotlin/blob/0938b46726b9c6938df309098316ce741815bb55/libraries/stdlib/common/src/generated/_Arrays.kt#L14700))
+where many of them are duplicated to have `maxOfOrNull` counterpart in case of empty collections.
+
+> TODO: discuss: What was behind "It's quite common to encounter functions that describe part of their effects for error cases in their names."? Only orNull, orThrow? Or something more complex?
+> 
+> Next is written assuming that it is only about orNull and orThrow.
+
+Both of them are useful in different cases. 
+- When you are considering the case of an empty collection as an expected case,
+  you would like to process it in a special, but concise way.
+  Throwing version does not fit here because:
+  - It requires boilerplate to catch the exception.
+  - It implies runtime overhead.
+  - It leads to complex control flow.
+- When you are considering the case of an empty collection as an exceptional case,
+  you would like to leave processing to your framework or to fail fast.
+  Null version does not fit here because:
+  - Bang-bang operator will lose the information about the specific error.
+
+While it is possible to have both versions, it leads to duplication of code and declaration.
+This could be solved by having a single function with a functional name like `max` or `processRequest`,
+where exceptional cases are soundly encoded in the return type.
+With the error union types, it could be written as follows:
+
+```kotlin
+// getOrThrow -> get
+fun <T> get(): T | Error
+
+// maxOrNull -> max
+fun IntArray.max(): Int | NoSuchElement
+
+// awaitSingleOrNull -> awaitSingle
+fun <T> awaitSingle(): T | NoSuchElement
+```
+
+In this case programmer is able to handle them at the call site in both ways.
+Either throw an exception using `!!` or process it in a special way using `when` expression and syntax sugar.
+
+> Additionally, it allows having a more informative stack trace in these cases.
+> As at the top of stack trace, there will be a place where the expectations of a programmer were violated, 
+> not some internals of the library.
+
 #### In-place tags
 
-A typical showcase of using in-place tags is `Sequence.last` function that is written as follows:
+The other use-case of the error union types arises when we would like to track exceptional states inside our function or class.
+A typical showcase is `Sequence.last` function that is written as follows:
 
 ```kotlin
 inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
@@ -35,7 +84,7 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 }
 ```
 
-The variable found is used specifically for cases when a predicate looks like `{ it == null }`. 
+The variable `found` is used specifically for cases when a predicate looks like `{ it == null }`. 
 It's a typical pattern for functions that retrieve data from containers (`single`/`singleOrNull`/`last`/...).
 
 One way to rewrite the code without using the variable `found` is to use some kind of private tag:
@@ -62,7 +111,7 @@ and performing an unchecked cast at the end.
 Combining the ideas of tags and unions, the mentioned code could be rewritten as follows:
 
 ```kotlin
-error object NotFound // new category of types
+error object NotFound
 
 inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
     var last: T | NotFound = NotFound
@@ -76,9 +125,10 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 }
 ```
 
-Our functions work for all `T` and it doesn't have unchecked casts
+Our functions work for all `T` and it doesn't have unchecked casts.
 
-To make this function fully correct, we have to prevent `NotFound` from leaking outside the function:
+To make this function fully correct, we have to prevent `NotFound` from leaking outside the function, 
+so it will be impossible to pass a sequence with `NotFound` to this function, leading to an incorrect behavior.
 
 ```kotlin
 inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
@@ -95,33 +145,14 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 }
 ```
 
-#### ...OrThrow / ...OrNull
-
-It's quite common to encounter functions that describe part of their effects for error cases in their names.
-This pattern could be enhanced by having only one function with a functional name like `get` or `processRequest`,
-where exceptional cases are encoded in the signature.
-
-A typical example could be our functions `maxOf` 
-([code](https://github.com/JetBrains/kotlin/blob/0938b46726b9c6938df309098316ce741815bb55/libraries/stdlib/common/src/generated/_Arrays.kt#L14700)) 
-where many functions are duplicated to have `maxOfOrNull` counterpart in case of empty collections.
-
-With the error union types, it is possible to define one method that can encode all the necessary error cases:
-
-```kotlin
-// getOrThrow -> get
-fun <T> get(): T | Error
-
-// maxOrNull -> max
-fun IntArray.max(): Int | NoSuchElement
-
-// awaitSingleOrNull -> awaitSingle
-fun <T> awaitSingle(): T | NoSuchElement
-```
-
-And programmer is able at the call-site 
-transform them into sound exceptions using `!!` operator or process them in any way.
+The new implementation is better in several ways:
+- It is more readable as it merged two variables with shared logic into one.
+- It requires 2 lines less.
+- It is type-safe as it does not require unchecked casts.
 
 ### Background
+
+In this section, we discuss other approaches that could be used to solve the mentioned use-cases. 
 
 #### Either
 
@@ -155,10 +186,17 @@ But this approach has several disadvantages:
   Consequently, if you would like to have several possible errors, you have to create a sealed hierarchy for them.
   And you will not be able to return a subset of this hierarchy by handling only a part of errors.
 - Even with the introduction of arbitrary unions, due to expressiveness of common types, unions on them will be limited.
+- `Either` implies performance overhead on boxing.
+
+By resolving all of these issues, 
+we came up with no-boxed one-level `Either` with specific kind of types allowed as errors.
+Which is actually the same as proposed error unions.
 
 #### Error union type in Zig
 
-The most similar feature to the proposed one is [error union types in Zig](https://ziglang.org/documentation/master/#Error-Union-Type).
+> TODO: this section should be elaborated?
+
+The most similar language feature to the proposed one is [error union types in Zig](https://ziglang.org/documentation/master/#Error-Union-Type).
 
 The broad overview of the feature is the following:
 - Error types are just tags without data, represented as integers at runtime.
@@ -166,11 +204,14 @@ The broad overview of the feature is the following:
 - Arbitrary error unions are allowed.
 - Allowed inference of error in return type.
 - In debug mode, tracing of error bubbling is enabled.
+- No type variables representing set of errors.
 
 #### Effects as error handling
 
 Effects is another technique to handle errors.
 It is used in languages like: TODO:...
+
+> TODO: Better introduction
 
 The idea is that functions may trigger some effects, which are handled by the respective handler at the callstack.
 The difference with exceptions is that effects are:
@@ -186,6 +227,8 @@ While they are great to track some IO interactions and unrecoverable exceptions,
 they may be too complex to handle simple cases like function `last` or that user's age is not in the range.
 
 ### Goals
+
+> TODO: rewrite goals
 
 1. Cover mentioned use-cases.
 2. Minimize boilerplate required to operate with errors to the same level as with nulls.
@@ -295,7 +338,7 @@ The resulting subtype hierarchy between those types is the following:
 2. `Value :> Int`, `Value :> String`, etc.
 3. `Error :> MyError`, `Error :> ConnectionError`, etc.
 4. `MyError :> Nothing`, `ConnectionError :> Nothing`, etc.
-
+TODO: Any -> Top
 > TODO: Discuss: 
 > 
 > IMO we should name `Any` as a supertype for all values and `Ref` (name is really problematic) as a supertype for everything.
@@ -697,6 +740,10 @@ We have to exclude the checked type from the union
 > t!!
 > ```
 > We should smart-cast `t` to `T & Value`
+
+## More examples of idiomatic code
+
+TODO
 
 ## Extra considerations
 
