@@ -1146,3 +1146,114 @@ Which return type is expected?
     1. Requires more letters to better design the value hierarchy.
     2. No overhead-less optional for JVM.
     3. Users may continue to use null for optional and do not use errors at all.
+
+## Approach
+
+We had a preliminary discussion about a design where errors have a separate hierarchy with the same features as existing classes.
+This approach is directed by a goal "Let's add as many features as possible to remain errors inferrable".
+But this approach has several significant issues.
+
+The first problem of this full-flavored approach is performance-based.
+All functions that would like to have a specific internal state create a new private class.
+Mapping them to separate JVM classes leads to a significant number of small classes in JVM and class-loader calls.
+This performance issue is similar to one encountered in the JVM at the moment of lambda's introduction.
+
+The other and more significant problem with full-fledged approach is
+that it is not easily supported by the type inference.
+When unions are discussed in terms of Kotlin's future, they are required to be disjoint.
+But in the case of errors, it is not possible.
+Let's consider the example of the `find` function.
+We would like to replace two overloads of this function (with null and with exception) with a single version with error union.
+Resulting function is expected to be the following:
+
+```kotlin
+fun <T> Iterable<T>.find(f: (T) -> Boolean): T | NotFound
+```
+
+But it is not disjoint as `T` may contain `NotFound` itself.
+So we would like to allow some kind of non-disjointness for error unions.
+To achieve this, we have to use a slightly different approach compared to one used for the whole language.
+
+Thus, we moved into approach where we try to make as few features as possible that will cover all known use-cases.
+
+With this approach, we do not allow for error types:
+- Generics.
+
+  Generics provide the main issue with unions in Kotlin.
+  While for disjoint unions it is possible to do something,
+  in a non-disjoint approach we easily encounter the following issue:
+  ```kotlin
+  fun <T> foo(v: T) {
+    val a: T | MyError<String> = v
+    // ...
+    if (a is MyError) {
+      a // Expected: MyError<String>, Actual: MyError<*>
+    }
+  }
+  ```
+  In this code we may expect that if `a` is `MyError`, then it is `MyError<String>`.
+  The issue is that we do not know anything about generic parameters of `MyError` in `T`.
+  Possible solutions to this issue are:
+  - Consider this behavior as ok.
+    But it is really confusing if generic parameters become use-less in unexpected case.
+  - Prohibit union of type variable and error with generic parameters.
+    But we allow such a union in case of no generic parameters.
+    Quite a confusing behavior.
+  - Do not allow generics for errors.
+    This approach is the chosen one. 
+    Advantages:
+    - It will not generate anything confusing.
+    - There are no clear use-cases where generics are significant for errors.
+    - There is an opinion that they will generate more issues in type inference which we could not establish so far.
+- Subtyping.
+
+  Actually, it is possible to add subtyping for errors.
+  But there are several cons against this option:
+  - There are no clear use-cases where subtyping is significant and could not be replaced with typealias.
+    More precisely:
+    ```kotlin
+    abstract error class DbError
+    error class DbConnectionCancelled : DbError
+    error class DbTokenExpired : DbError
+    // replace with:
+    error class DbConnectionCancelled
+    error class DbTokenExpired
+    typealias DbError = DbTokenExpired | DbConnectionCancelled
+    ```
+  - Subtyping forces us to use 1to1 mapping from errors to JVM classes which have mentioned performance issues.
+  - Type inference for errors will never infer a supertype.
+    Instead, it will just list all possible actual errors.
+    So supertype is only for explicit annotations.
+  - We do not want users to abuse this feature.
+    And in terms of errors, the actual value of a supertype is just a list of subtypes.
+    Any abstract method is a sign of abuse.
+    So typealias is even more semantically sound for errors.
+    In an extra cases where it is required, typealias + extension function is all you need.
+
+## Notes on type inference
+
+It is impossible in general to allow two non-disjoint generic variables in a union (in arguments).
+For example:
+
+```kotlin
+fun <E1 : Error, E2 : Error> foo(a: In<Int | E1>, b: In<Int | E1 | E2>): In<Int | E1> 
+```
+
+For this declaration one ay think that we may infer `E1` from first argument and `E2` from the second.
+But the issue is that exact argument may be quite uninformative.
+For example: `foo(In<Int | Error>, In<Int | MyError>)`.
+There are two correct and most precise solutions and they lead to different return types.
+More precisely, we have two constraints: `E1 <: Error` and `E1 | E2 <: MyError`.
+We are not able to fix `E1` depending on the first argument to be `Error`, because it leads to a failure in resultion.
+And there is no obvious way to choose between `E1` and `E2` in case of second expression.
+Any hacks will lead to issues in the future and unpredictable behavior.
+
+Thus, generic variables in unions have to be disjoint.
+
+TODO: question is it possible in return type? 
+Because if there is an expected type, 
+the only thing we have to do is to satisfy this return type, and it does not matter in which set we put the error.
+And if there is no expected type, 
+then this union of variables does not affect inference, and we will just infer some resulting union.
+
+The issue is that it may affect the resolution of inner calls and lead to some complications in the future for no obvious gain.

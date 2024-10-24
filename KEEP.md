@@ -237,94 +237,11 @@ they may be too complex to handle simple cases like function `last` or that user
 
 ## Proposal
 
-### Approach
-
-TODO: rewrite & move
-
-We had a preliminary discussion about a design where errors have a separate hierarchy with the same features as existing classes.
-This approach is directed by a goal "Let's add as many features as possible to remain errors inferrable".
-But this approach has several significant issues.
-
-The first problem of this full-flavored approach is performance-based.
-All functions that would like to have a specific internal state create a new private class.
-Mapping them to separate JVM classes leads to a significant number of small classes in JVM and class-loader calls.
-This performance issue is similar to one encountered in the JVM at the moment of lambda's introduction.
-
-The other and more significant problem with full-fledged approach is
-that it is not easily supported by the type inference.
-When unions are discussed in terms of Kotlin's future, they are required to be disjoint.
-But in the case of errors, it is not possible.
-Let's consider the example of the `find` function.
-We would like to replace two overloads of this function (with null and with exception) with a single version with error union.
-Resulting function is expected to be the following:
-
-```kotlin
-fun <T> Iterable<T>.find(f: (T) -> Boolean): T | NotFound
-```
-
-But it is not disjoint as `T` may contain `NotFound` itself.
-So we would like to allow some kind of non-disjointness for error unions.
-To achieve this, we have to use a slightly different approach compared to one used for the whole language.
-
-Thus, we moved into approach where we try to make as few features as possible that will cover all known use-cases.
-
-With this approach, we do not allow for error types:
-- Generics.
-
-  Generics provide the main issue with unions in Kotlin.
-  While for disjoint unions it is possible to do something,
-  in a non-disjoint approach we easily encounter the following issue:
-  ```kotlin
-  fun <T> foo(v: T) {
-    val a: T | MyError<String> = v
-    // ...
-    if (a is MyError) {
-      a // Expected: MyError<String>, Actual: MyError<*>
-    }
-  }
-  ```
-  In this code we may expect that if `a` is `MyError`, then it is `MyError<String>`.
-  The issue is that we do not know anything about generic parameters of `MyError` in `T`.
-  Possible solutions to this issue are:
-  - Consider this behavior as ok.
-    But it is really confusing if generic parameters become use-less in unexpected case.
-  - Prohibit union of type variable and error with generic parameters.
-    But we allow such a union in case of no generic parameters.
-    Quite a confusing behavior.
-  - Do not allow generics for errors.
-    This approach is the chosen one. 
-    Advantages:
-    - It will not generate anything confusing.
-    - There are no clear use-cases where generics are significant for errors.
-    - There is an opinion that they will generate more issues in type inference which we could not establish so far.
-- Subtyping.
-
-  Actually, it is possible to add subtyping for errors.
-  But there are several cons against this option:
-  - There are no clear use-cases where subtyping is significant and could not be replaced with typealias.
-    More precisely:
-    ```kotlin
-    abstract error class DbError
-    error class DbConnectionCancelled : DbError
-    error class DbTokenExpired : DbError
-    // replace with:
-    error class DbConnectionCancelled
-    error class DbTokenExpired
-    typealias DbError = DbTokenExpired | DbConnectionCancelled
-    ```
-  - Subtyping forces us to use 1to1 mapping from errors to JVM classes which have mentioned performance issues.
-  - Type inference for errors will never infer a supertype.
-    Instead, it will just list all possible actual errors.
-    So supertype is only for explicit annotations.
-  - We do not want users to abuse this feature.
-    And in terms of errors, the actual value of a supertype is just a list of subtypes.
-    Any abstract method is a sign of abuse.
-    So typealias is even more semantically sound for errors.
-    In an extra cases where it is required, typealias + extension function is all you need.
-
 ### Type syntax
 
-Error type is a separate type kind, which is declared using a soft keyword `error`.
+TODO: these sections need a coherent text
+
+Error classifier is a special kind of classifier, which is declared using a soft keyword `error`.
 
 ```kotlin
 error class MyError(val code: Int)
@@ -338,19 +255,17 @@ The resulting subtype hierarchy between those types is the following:
 2. `Value :> Int`, `Value :> String`, etc.
 3. `Error :> MyError`, `Error :> ConnectionError`, etc.
 4. `MyError :> Nothing`, `ConnectionError :> Nothing`, etc.
-TODO: Any -> Top
-> TODO: Discuss: 
+
+> Fixup:
+> `Any :> Value` and `Any? :> Error`
+> `Any :> Error \ Null`
 > 
-> IMO we should name `Any` as a supertype for all values and `Ref` (name is really problematic) as a supertype for everything.
-> Cons:
-> - in cases `fun <T> foo(t: T): T & Any` programmer means that `T & Any` is a value without any other states (like `null` before)
-> - The same in cases like `class C(val v: Any)` it does not accept any error before (only null existed), 
->   why should it start accepting null or any other error now?
-> - So it is a requirement of backward compatibility
+> Yes, hierarchy is hacky in that form, but it is backward compatible and fine enough
+> Actually we may also introduce `Top` that is equal to `Any?`, to prevent further issues, but it is optional.
 > 
-> We may not introduce a supertype for Any, but introduce a syntax `Any??` for `Any | Error`.
+> It works well with hashCode and equals, as they are defined in `Any` and `Error` is a subtype of `Any`.
 > 
-> TODO: existing `Any?` usages which expected to be able to assiged to any value. 
+> ToThink: how it works with reflection or any other functions applicable to `Any`
 
 These types may be used in a union with common type:
 
@@ -361,22 +276,46 @@ fun foo(val content: String | ConnectionError | DbError): Int? | OtherError
 Limitations on those types:
 1. It may contain only one non-error type.
    And it has to be written in the leftmost position.
-2. Error type may contain only disjoint type variables.
-   Even if they are rigid.
+2. It may contain an arbitrary number of variables representing sets of errors.
+   For example, in the following code:
+   ```kotlin
+   class C<E1 : Error> {
+     error object MyError
+   
+     fun <E2 : Error, E3 : Error> foo(
+       arg1: Int | E1,
+       arg2: Int | E2,
+       arg3: Int | E3,
+       arg4: Int | MyError,
+     ) {
+       val v = when (Random.nextInt(4)) {
+         0 -> arg1
+         1 -> arg2
+         2 -> arg3
+         3 -> arg4
+       }
+     }
+   }
+   ```
+   inferred type of the variable `v` will be `Int | E1 | E2 | E3 | MyError`.
+3. In the signature of the function, union of generic variables is only allowed if they are disjoint.
    For example:
    ```kotlin
-   fun <T, V : Value, E1 : Error, E2 : Error, EDB: DbErrors, EP: ParseErrors> foo(
-      arg1: T | MyError, // allowed
-      arg2: V | MyError, // allowed
-      arg3: V | EDB | EP, // allowed
-      arg4: V | E1 | MyError, // allowed
-      arg5: String | E1 | E2, // not allowed as E1 and E2 are not disjoint
-      arg6: T | E1, // not allowed as error component of T and E1 are not disjoint
-   )
-   ```
+   class C<E1 : Error> {
+     error object MyError
    
-> Actually, any limitations other than first one are consequences of the inference algorithm.
-> TODO: review the algorithm, formalize requirement better, check for forward compatibility
+     fun <T, V : Value, E2 : Error, E3 : Error, EDB: DbErrors, EP: ParseErrors> foo(
+       arg1: T | MyError, // allowed
+       arg2: V | MyError, // allowed
+       arg3: V | EDB | EP, // allowed
+       arg4: V | E2 | MyError, // allowed
+       arg5: V | E1 | E2 | MyError, // allowed
+       arg6: V | E2 | E3, // not allowed as E2 and E3 are not disjoint
+       arg7: T | E1, // not allowed as T and E1 are not disjoint (T may have error component)
+       arg8: V | E2 | EDB, // not allowed as E2 and EDB are not disjoint
+     )
+   }
+   ```
 
 ### Relation with `null`
 
@@ -416,7 +355,7 @@ fun foo(val content: String | ConnectionError | DbError) =
     }
 ```
 
-> TODO: there is some issue with refering to `DbError` with name content.
+> TODO: there is some issue with referring to `DbError` with name content.
 > Maybe it is reason why other languages introduce two return values for error and value.
 > IMO to store them in a single value much better, but maybe we need a syntax for creating a new name or inplace destruction could be enough.
 > ```kotlin
@@ -484,7 +423,7 @@ To not check for error after each call as in C, there are several operators:
 
 #### New operator
 
-TODO: discuss section
+TODO: discuss section on meeting
 
 It is fine to apply all existing operators to errors, but with errors we may often encounter the following pattern:
 
@@ -626,6 +565,8 @@ With this approach and declaration of the error could be transformed into:
 
 ### Typing
 
+TODO: this section is outdated. To rewrite, see "Notes on type inference" in "Notes.md".
+
 #### Types
 
 - New types: `Error` (supertype for all errors), `Value` (supertype for all common types)
@@ -694,7 +635,8 @@ Possible solutions:
 
 #### Backward compatibility with nullability
 
-TODO: review mapping, consider corner cases
+> TODO: review mapping, consider corner cases.
+> It is actually interesting in terms of strange subtyping of `Any`
 
 ### Relation to other features
 
