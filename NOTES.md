@@ -1257,3 +1257,25 @@ And if there is no expected type,
 then this union of variables does not affect inference, and we will just infer some resulting union.
 
 The issue is that it may affect the resolution of inner calls and lead to some complications in the future for no obvious gain.
+
+## New use-case
+
+Is not it one more use-cases for our unions:
+
+```kotlin
+fun parse(list: List<Token>) = list.mapNoError {
+    var level = 0
+    when (it) {
+      is Open -> (level++; Continue)
+      is Close -> (level--; if (level <= 0) Break else Continue)
+      else ->  it to level
+    }
+}
+```
+
+## Null is (not) an error
+
+
+https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors#focus=Comments-27-9865174.0-0
+https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors#focus=Comments-27-9976625.0-0
+

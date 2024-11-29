@@ -1,4 +1,5 @@
 # Union Types for Errors
+> TODO: discuss: another name (states or something)
 
 * **Type**: Design proposal
 * **Authors**: Roman Venediktov, Daniil Berezun
@@ -237,46 +238,64 @@ they may be too complex to handle simple cases like function `last` or that user
 
 ## Proposal
 
-### Type syntax
+### Errors declaration
 
-TODO: these sections need a coherent text
-
-Error classifier is a special kind of classifier, which is declared using a soft keyword `error`.
+Error classifier is declared using a soft keyword `error`:
 
 ```kotlin
 error class MyError(val code: Int)
 ```
 
-Error type may not have any supertypes
-other than new common supertype for all of them, `Error`.
-We are also introducing new type `Value` which is a supertype for all non-error types.
-The resulting subtype hierarchy between those types is the following:
-1. `Any :> Value` and `Any :> Error`
-2. `Value :> Int`, `Value :> String`, etc.
-3. `Error :> MyError`, `Error :> ConnectionError`, etc.
-4. `MyError :> Nothing`, `ConnectionError :> Nothing`, etc.
+While they have similar syntax to classes, they have two significant limitations:
+- They may not have any super-classifiers.
+- They may not have any generic parameters.
 
-> Fixup:
-> `Any :> Value` and `Any? :> Error`
-> `Any :> Error \ Null`
-> 
-> Yes, hierarchy is hacky in that form, but it is backward compatible and fine enough
-> Actually we may also introduce `Top` that is equal to `Any?`, to prevent further issues, but it is optional.
-> 
-> It works well with hashCode and equals, as they are defined in `Any` and `Error` is a subtype of `Any`.
-> 
-> ToThink: how it works with reflection or any other functions applicable to `Any`
+The only supertype for errors is `Error` which is a new synthetic type alike `Any`.
+Also, there is a new type `Value` which is a supertype for all common (non-error) classes.
 
-These types may be used in a union with common type:
+### Errors usage
+
+Error types may be united with common types using `|` operator to form an error union type.
 
 ```kotlin
-fun foo(val content: String | ConnectionError | DbError): Int? | OtherError
+fun foo(val content: String | ConnectionError | DbError): Int | OtherError
+```
+
+There may be even no common type in the union:
+
+```kotlin
+fun logError(val error: ConnectionError | DbError)
 ```
 
 Limitations on those types:
 1. It may contain only one non-error type.
    And it has to be written in the leftmost position.
-2. It may contain an arbitrary number of variables representing sets of errors.
+2. In the signature of the function, union of generic variables is only allowed if they are disjoint.
+   For example:
+   ```kotlin
+   class C<E1 : Error> {
+     error object MyError
+   
+     fun <T, V : Value, E2 : Error, E3 : Error, EDB: DbErrors, EP: ParseErrors> foo(
+       arg1: T | MyError, // allowed
+       arg2: V | MyError, // allowed
+       arg3: V | EDB | EP, // allowed
+       arg4: V | E2 | MyError, // allowed
+       arg5: V | E1 | E2 | MyError, // allowed, as E1 is inferred before any call of this function
+       arg6: V | E2 | E3, // not allowed as E2 and E3 are not disjoint
+       arg7: T | E1, // not allowed as T and E1 are not disjoint (T may have error component)
+       arg8: V | E2 | EDB, // not allowed as E2 and EDB are not disjoint
+     )
+   }
+   ```
+   > TODO: discuss: maybe prohibit it at all? 
+   > It may complicate something, while have no real use-cases.
+   > We may introduce it when common unions will be introduced.
+   > 
+   > TODO: discuss: "as E1 is inferred before any call of this function" is it true?
+   
+More precisely:
+1. It may contain an arbitrary number of variables representing sets of errors.
    For example, in the following code:
    ```kotlin
    class C<E1 : Error> {
@@ -298,47 +317,8 @@ Limitations on those types:
    }
    ```
    inferred type of the variable `v` will be `Int | E1 | E2 | E3 | MyError`.
-3. In the signature of the function, union of generic variables is only allowed if they are disjoint.
-   For example:
-   ```kotlin
-   class C<E1 : Error> {
-     error object MyError
-   
-     fun <T, V : Value, E2 : Error, E3 : Error, EDB: DbErrors, EP: ParseErrors> foo(
-       arg1: T | MyError, // allowed
-       arg2: V | MyError, // allowed
-       arg3: V | EDB | EP, // allowed
-       arg4: V | E2 | MyError, // allowed
-       arg5: V | E1 | E2 | MyError, // allowed
-       arg6: V | E2 | E3, // not allowed as E2 and E3 are not disjoint
-       arg7: T | E1, // not allowed as T and E1 are not disjoint (T may have error component)
-       arg8: V | E2 | EDB, // not allowed as E2 and EDB are not disjoint
-     )
-   }
-   ```
 
-### Relation with `null`
-
-`null` is another special value which is typed orthogonal to class hierarchy.
-There already exists a special handling like smart casts, operators and not-null generic types.
-If we would like to have these two features separately, 
-we have to introduce whole new machinery not only in the compiler but also in the syntax.
-It leads to different safe call operators for `null` and for errors.
-What if we would like to make a safe call that filters out only errors, only nulls or both?
-To cover all of these cases and all possible future interactions,
-we have to cover quadratic number of operators and features.
-
-While actually, `null` is mostly used as an error and even if it is used as optional value,
-ideas of optional and either are quite similar.
-So we decide to merge these two features into one:
-- `null` is become a special value of type `error object Null`.
-- `T?` is become a syntax sugar for `T | Null`.
-- `?.`, `!!`, `?:` becomes an operators for errors
-
-This change is backward compatible, as behavior is not changed for current code.
-There is simple translation from nullable types to error unions with only one error, `Null`.
-
-### Operating with errors
+### Operating with errors 1
 
 The most straightforward way to destruct error union is to use `when` expression:
 
@@ -366,9 +346,68 @@ fun foo(val content: String | ConnectionError | DbError) =
 >         is DbError(message) -> logger.error("DB error: ${message}")
 >     }
 > ```
-> This issue is close to pattern matching
+> This issue is close to pattern matching\
 
-To not check for error after each call as in C, there are several operators: 
+To simplify operating with errors, it may be useful to introduce several operators like for nulls.
+Before introducing them, let's discuss relations between errors and null.
+
+### `null` is the Error
+
+`null` is another special value which is typed orthogonal to class hierarchy.
+There already exists a special handling like smart casts, operators and not-null generic types.
+If we would like to have these two features separately, 
+we have to introduce whole new machinery not only in the compiler but also in the syntax.
+It leads to different safe call operators for `null` and for errors.
+What if we would like to make a safe call that filters out only errors, only nulls or both?
+To cover all of these cases and all possible future interactions,
+we have to cover quadratic number of operators and features.
+Which complicates everything, the language readability, the compiler, the IDE, the documentation, etc.
+
+In addition to this issue, 
+`null` is actually often used as an only error that may happen in the function with explanation in the comment.
+While it is a good idea to use descriptive error instead of `null` with this KEEP, 
+migration of all use-site usages may be another issue.
+While if we treat them in the same way, significantly fewer use-site modifications are required.
+
+Another reason is that treating `null` as an error is more consistent with the language.
+By preserving less similar categories, 
+we simplify future code where `null` and more informative errors will be used in one value.
+While it may provide some inconveniences in cases where `null` is used to make unboxed optional.
+More precisely, for variable `spouse: Person | Null | DbError`, 
+where `null` is used to represent the absence of spouse, 
+operator `!!` will definitely have an unexpected behavior and `.?` also behaves not as expected in some cases.
+This use-case still has workaround with `when` expression, and **we may consider a new operator for this case?**.
+
+In terms of formal backward compatibility, this change is ok, 
+as for all existing code behavior is not changed, 
+while with an introduction of new errors in a standard library, 
+either compilation will fail, 
+or they will be swallowed together by operator `!!`.
+
+### Subtyping of errors
+
+Now, as we discussed relation of `null` and errors, we may fully examine their subtyping.
+As were mentioned, together with error types, two new types are introduced: `Error` and `Value`, 
+representing a common supertype for all error types and all non-error types respectively.
+With this, we have a new subtype hierarchy:
+
+![Subtyping diagram](subtyping.png)
+
+More precisely:
+1. `Any :> Value`
+2. `Any? :> Error`
+3. `Error` is a supertype for all errors.
+4. `Any` is a supertype for all errors except `Null`.
+5. `Value` is a supertype for all common classes.
+6. `Nothing` is a subtype for all types.
+
+> TODO: discuss: What do you think of this hacky hierarchy?
+> 
+> TODO: discuss: deprecation of `Any`? :) (Replace with `Top` =:= `Any?`)
+
+### Operating with errors 2
+
+As mentioned, all operators for nullable types become applicable for error types.
 
 - Safe call operator. `?.`
   
@@ -388,7 +427,7 @@ To not check for error after each call as in C, there are several operators:
   // expands into
   val v2 = 
     if (v1 is Error) {
-      throw ErrorException(v1)
+      throw UnexpectedErrorException(v1)
     } else {
       v1
     }
@@ -425,6 +464,10 @@ To not check for error after each call as in C, there are several operators:
 
 TODO: discuss section on meeting
 
+> https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors#focus=Comments-27-9976626.0-0
+> 
+> Taking everything together, it seems like the boundary for pragmatism should be in defining these error unions and using them with existing constructs like the when statement without creating deconstructor syntactic sugar. While developers want to save lines when writing code, we spend 10 times more time reading code so we should prioritize clarity and obvious control flow over clever syntax.
+
 It is fine to apply all existing operators to errors, but with errors we may often encounter the following pattern:
 
 ```kotlin
@@ -436,6 +479,8 @@ val v = when (val tmp = foo()) {
 }
 ```
 
+> The other workaround for new operator is optional + errors
+
 It may be quite useful to introduce a syntax sugar over this pattern.
 It is quite complex to find a good syntax for it.
 Some options:
@@ -446,7 +491,9 @@ Some options:
     val v = foo()
         .on<NetworkError> { TODO("Some code") }
         .on<DbError | CacheError> { TODO("Some other code") }
+        .throwOn<AuthError>()
     ```
+    > It does not provide workaround for optional with errors
 - No new syntax, just bind error in a new variable in elvis operator.
   Suboptions: 
   - Implicitly introduce a new variable with name `it` (or `err`).
@@ -519,20 +566,20 @@ Some options:
             is DbError -> 1
             else -> throw it
         }
-        ```
-    - ```kotlin
-        val v = foo() !! {
-            is NetworkError -> 0
-            is DbError -> 1
-        }
-        ```
-    - ```kotlin
-        val v = foo() !! when {
-            is NetworkError -> 0
-            is DbError -> 1
-            else -> throw it
-        }
-        ```
+    ```
+  - ```kotlin
+      val v = foo() !! {
+          is NetworkError -> 0
+          is DbError -> 1
+      }
+    ```
+  - ```kotlin
+      val v = foo() !! when {
+          is NetworkError -> 0
+          is DbError -> 1
+          else -> throw it
+      }
+    ```
     
 > We think that word `catch` should not be used as it is already used for exceptions.
 > And we should not create mental relation between them.
@@ -693,7 +740,8 @@ TODO
 
 #### Kotlin's value types
 
-TODO
+Actually, everything is ok if this value class does not contain an error-able class.
+Otherwise, it implies boxing of value class.
 
 #### Valhalla's value types
 
@@ -736,6 +784,9 @@ It looks impossible and impractical to prevent them so we have to rely on the de
 ### Origin of errors
 
 TODO: it is possible to bubble errors if they were called with some specific modifier?
+
+> Actually IMO it should not be useful as Error is an expected result of the function. You should not be interested in where exactly `String` were not parsed into `Int`. 
+> To bubble this value is the same as to bubble, where the return value became 7 instead of expected 42.
 
 ### Local error unions
 
