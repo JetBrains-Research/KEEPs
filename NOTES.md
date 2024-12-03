@@ -1275,7 +1275,15 @@ fun parse(list: List<Token>) = list.mapNoError {
 
 ## Null is (not) an error
 
-
 https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors#focus=Comments-27-9865174.0-0
 https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors#focus=Comments-27-9976625.0-0
 
+> In zig they are orthogonal
+
+## Example
+
+```
+    createFolders(dir, paths) catch |err| switch (err) {
+        .WriteError => |path| std.debug.print("Could not write: {s}\n", .{path}),
+    };
+```

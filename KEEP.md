@@ -153,7 +153,7 @@ The new implementation is better in several ways:
 
 ### Background
 
-In this section, we discuss other approaches that could be used to solve the mentioned use-cases. 
+In this section, we discuss other approaches that could be used to solve the mentioned use-cases.
 
 #### Either
 
@@ -193,24 +193,12 @@ By resolving all of these issues,
 we came up with no-boxed one-level `Either` with specific kind of types allowed as errors.
 Which is actually the same as proposed error unions.
 
-#### Error union type in Zig
-
-> TODO: this section should be elaborated?
-
-The most similar language feature to the proposed one is [error union types in Zig](https://ziglang.org/documentation/master/#Error-Union-Type).
-
-The broad overview of the feature is the following:
-- Error types are just tags without data, represented as integers at runtime.
-- Equal names implies equality of errors.
-- Arbitrary error unions are allowed.
-- Allowed inference of error in return type.
-- In debug mode, tracing of error bubbling is enabled.
-- No type variables representing set of errors.
-
 #### Effects as error handling
 
 Effects is another technique to handle errors.
-It is used in languages like: TODO:...
+While it is not widespread on the language level so far 
+(experimental in Scala, OCaml) (despite coroutines in Kotlin is an effect system), 
+it is actively researched and has a lot of libraries in most of languages.
 
 > TODO: Better introduction
 
@@ -227,9 +215,114 @@ But we state that their use-cases are different from the proposed feature.
 While they are great to track some IO interactions and unrecoverable exceptions, 
 they may be too complex to handle simple cases like function `last` or that user's age is not in the range.
 
+#### Error union type in Zig
+
+The most similar language feature to the proposed one is [error union types in Zig](https://ziglang.org/documentation/master/#Error-Union-Type).
+Here is a brief overview of the feature:
+- There are both nullable (optionals) and error union types in the language, and they are orthogonal.
+- Error types are just tags without data, represented as integers at runtime.
+- Errors may be either declared preliminary with the corresponding set:
+    ```zig
+    const FileOpenError = error{
+        AccessDenied,
+        OutOfMemory,
+        FileNotFound,
+    };
+    // ...
+    const err = FileOpenError.FileNotFound;
+    ```
+    or declared on the fly using `error` keyword:
+    ```zig
+    const err = error.FileNotFound;
+    ```
+- Equal names implies equality of errors:
+  ```zig
+  const FileOpenError = error{
+      AccessDenied,
+      OutOfMemory,
+      FileNotFound,
+  };
+  const AllocationError = error{
+      OutOfMemory,
+  };
+  // ...
+  const err1 = FileOpenError.OutOfMemory;
+  const err2 = AllocationError.OutOfMemory;
+  const err3 = error.OutOfMemory;
+  // err1 == err2 == err3
+  ```
+  While it is useful as it allows for a variable to be assigned to a type 
+  with a wider set of errors without usage of fully qualified names.
+  Probability of unintentional clash considered as an issue (but minor).
+- Syntax for error unions:
+  - ```zig
+    FileOpenError!u64
+    ```
+    Any error from the set `FileOpenError` or `u64`.
+  - ```zig
+    error{FileOpenError, AllocationError}!u64
+    ```
+    `FileOpenError` or `AllocationError` or `u64`.
+  - ```zig
+    anyerror!u64
+    ```
+    Any error or `u64`.
+  - ```zig
+    !u64
+    ```
+    Error set for this variable or function return type has to be inferred.
+- The most straightforward way to handle errors is to use special `if` statement:
+  ```zig
+  const result: FileOpenError!u64
+  if (result) |value| {
+      // u64 in variable value
+  } else |err| {
+      // FileOpenError in variable err
+  }
+  ```
+  and combining with `switch` expression:
+  ```zig
+  const result: FileOpenError!u64
+  if (result) |value| {
+      // u64 in variable value
+  } else |err| switch (err) {
+      error.AccessDenied => // ...
+      error.OutOfMemory => // ...
+      error.FileNotFound => // ...
+  }
+  ```
+- There are two special operators for error handling.
+  - `catch`:
+    ```zig
+    fn foo() !u32 {
+        // ...
+    }
+    // ...
+    
+    // Option without binding
+    const v1 = foo() catch 42;
+    
+    // Option with binding
+    const v2 = foo() catch |err| switch (err) {
+        // ...
+    };
+    ```
+    A form of elvis operator.
+  - `try`:
+    ```zig
+    const v3 = try foo();
+    ```
+    A form of bang-bang operator.
+    If `foo` returns an error, it will be returned from the current function as well.
+- There is a possibility to trace error bubbling through the tyr calls at the callstack.
+- There are no complex generics in Zig, so there is no possibility to have a variables in error types as well.
+- There is a [proposal](https://github.com/ziglang/zig/issues/2647) for allowing content in errors, 
+  which is still not implemented.
+- In general, users love this feature and consider error handling in zig as one of the best.
+
 ### Goals
 
-> TODO: rewrite goals
+> TODO: remove a redundant section?
 
 1. Cover mentioned use-cases.
 2. Minimize boilerplate required to operate with errors to the same level as with nulls.
@@ -261,7 +354,7 @@ Error types may be united with common types using `|` operator to form an error 
 fun foo(val content: String | ConnectionError | DbError): Int | OtherError
 ```
 
-There may be even no common type in the union:
+There may be even no non-error type in the union:
 
 ```kotlin
 fun logError(val error: ConnectionError | DbError)
@@ -288,7 +381,7 @@ Limitations on those types:
      )
    }
    ```
-   > TODO: discuss: maybe prohibit it at all? 
+   > TODO: discuss: maybe prohibit it at all?
    > It may complicate something, while have no real use-cases.
    > We may introduce it when common unions will be introduced.
    > 
@@ -346,7 +439,7 @@ fun foo(val content: String | ConnectionError | DbError) =
 >         is DbError(message) -> logger.error("DB error: ${message}")
 >     }
 > ```
-> This issue is close to pattern matching\
+> This issue is close to pattern matching
 
 To simplify operating with errors, it may be useful to introduce several operators like for nulls.
 Before introducing them, let's discuss relations between errors and null.
@@ -596,7 +689,7 @@ class Error<T>(val classifier: String, val content: T)
 
 - Classifier is not just a name of the error, but also a scope where it is declared.
   Any checks for errors could be performed using just string equality.
-  And these strings even could be transformed into `.intern()` to reduce it to reference equality.
+  And these strings even could be transformed into `.intern()` to reduce any comparison to reference equality.
 - Content is null for errors without data.
 - If there is some data, there are several options to store them.
   - If there is one field, we may store it directly.
@@ -621,6 +714,12 @@ TODO: this section is outdated. To rewrite, see "Notes on type inference" in "No
 
 #### Well-formattedness
 
+> do we need to variables in the error component at all? (even in not signature types)
+> 
+> do we need even two variables in different components (T | E)?
+> 
+> What is the use-case? What are the complications? Is it easily mapped to type inference?
+
 `A | B` is well-formed if:
 - `A` and `B` are well-formed
 - `B <: Error`
@@ -630,7 +729,7 @@ TODO: this section is outdated. To rewrite, see "Notes on type inference" in "No
   > - `E | Errs`, where E is an unbounded error variable
   > - `E1 | E2 | E3 | Errs`, where `E1` and `E2` and `E3` are error variables with disjoint upper bounds.
       F.e. DbErrors, NetworkErrors, and CacheErrors
-- Constants in `B` are disjoint
+- Constant errors in `B` are disjoint
 
 #### Operations
 
