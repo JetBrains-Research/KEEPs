@@ -1,16 +1,8 @@
-# Union Types for Errors
-> TODO: discuss: another name (states or something)
-
-* **Type**: Design proposal
-* **Authors**: Roman Venediktov, Daniil Berezun
-* **Contributors**: Marat Akhin, Mikhail Zarechenskiy
-* **Status**: In research
-* **Related YouTrack issue**: [KT-68296](https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors)
+# preKEEP for Union Types for Errors
 
 ## Overview
 
-This KEEP introduces *union error types*,
-which allows for better handling of expected failure states for values and function results.
+This document is a legacy proposal of union error types in Kotlin.
 
 ## Problem statement
 
@@ -18,16 +10,10 @@ which allows for better handling of expected failure states for values and funct
 
 #### ...OrThrow / ...OrNull
 
-> TODO: discuss: What is the issue with only `orNull` version and !! usage? To agree on this requires for better understanding on expected conversions of errors to exceptions.
-
 It's quite common to encounter functions that describe part of their effects for error cases in their names.
 A typical example could be functions `maxOf` from the standard library
 ([code](https://github.com/JetBrains/kotlin/blob/0938b46726b9c6938df309098316ce741815bb55/libraries/stdlib/common/src/generated/_Arrays.kt#L14700))
 where many of them are duplicated to have `maxOfOrNull` counterpart in case of empty collections.
-
-> TODO: discuss: What was behind "It's quite common to encounter functions that describe part of their effects for error cases in their names."? Only orNull, orThrow? Or something more complex?
-> 
-> Next is written assuming that it is only about orNull and orThrow.
 
 Both of them are useful in different cases. 
 - When you are considering the case of an empty collection as an expected case,
@@ -148,7 +134,7 @@ inline fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T {
 
 The new implementation is better in several ways:
 - It is more readable as it merged two variables with shared logic into one.
-- It requires 2 lines less.
+- It requires two lines less.
 - It is type-safe as it does not require unchecked casts.
 
 ### Background
@@ -198,22 +184,47 @@ Which is actually the same as proposed error unions.
 Effects is another technique to handle errors.
 While it is not widespread on the language level so far 
 (experimental in Scala, OCaml) (despite coroutines in Kotlin is an effect system), 
-it is actively researched and has a lot of libraries in most of languages.
+it is actively researched and has a lot of libraries in most of the languages.
 
-> TODO: Better introduction
+The idea of effects is that all side effects that pure function may produce can be described as a set of functions 
+(e.g. write to file, read from a file).
+And we are able to track for each function which effects it may have.
+For example, the following function may have two effects: read from a file and throw an exception:
 
-The idea is that functions may trigger some effects, which are handled by the respective handler at the callstack.
-The difference with exceptions is that effects are:
-- Type-safe, as all possible effects have to be handled.
-- Allows continuing execution after the effect is handled.
+```kotlin
+fun foo(): Int {
+    val fileContent = readFile("file.txt")
+    return fileContent.toIntOrNull() ?: throw IllegalArgumentException("File content is not a number")
+}
+```
 
-Effects is a very promising technique that is actively researched and used in some languages.
-They may even be implemented in Kotlin in future using coroutines and context parameters.
-The good example of their adoption for OO language is [Scala's capabilities](https://docs.scala-lang.org/scala3/reference/experimental/cc.html).
+So it could be typed not as `() -> Int`, but as `() ->{ReadFile, MayThrow<IllegalArgumentException>} Int`.
+This type means that to call this function, we have to provide handlers for these effects.
+Thus, either caller have to have the same effects in the signature or call `foo` the following way:
 
-But we state that their use-cases are different from the proposed feature.
-While they are great to track some IO interactions and unrecoverable exceptions, 
-they may be too complex to handle simple cases like function `last` or that user's age is not in the range.
+```kotlin
+with(FileReader()) {
+    try {
+        foo()
+    } catch (e: IllegalArgumentException) {
+      // ...   
+    }
+}
+```
+
+While it looks similar to context parameters and just good implemented checked exceptions, 
+it requires some advanced type system features to be safe 
+([Scala research](https://docs.scala-lang.org/scala3/reference/experimental/cc.html)).
+
+Effects is quite a promising and powerful technique,
+but we state that their use-cases are different from the proposed feature.
+They are great to track IO interactions and some exceptions, 
+that are provided by the framework, 
+or introduced in the same codebase.
+But in the context of a library, where there is no information, how it will be used, 
+it is better to use error unions to allow user to process them straightforwardly or convert into desired exception.
+Also, business logic errors are better represented as error unions, 
+because they are often an expected behavior of the function and have to be explicitly handled by the immediate caller. 
 
 #### Error union type in Zig
 
@@ -315,19 +326,10 @@ Here is a brief overview of the feature:
     A form of bang-bang operator.
     If `foo` returns an error, it will be returned from the current function as well.
 - There is a possibility to trace error bubbling through the tyr calls at the callstack.
-- There are no complex generics in Zig, so there is no possibility to have a variables in error types as well.
+- There are no complex generics in Zig, so there is no possibility to have variables in error types as well.
 - There is a [proposal](https://github.com/ziglang/zig/issues/2647) for allowing content in errors, 
   which is still not implemented.
-- In general, users love this feature and consider error handling in zig as one of the best.
-
-### Goals
-
-> TODO: remove a redundant section?
-
-1. Cover mentioned use-cases.
-2. Minimize boilerplate required to operate with errors to the same level as with nulls.
-3. Minimize performance overhead.
-   Preferably to have an errors without data with the performance comparable to `null`.
+- In general, users love this feature and consider error handling in Zig as one of the best.
 
 ## Proposal
 
@@ -385,6 +387,8 @@ Limitations on those types:
    > It may complicate something, while have no real use-cases.
    > We may introduce it when common unions will be introduced.
    > 
+   > TODO: inspect stdlib and look for use-cases.
+   > 
    > TODO: discuss: "as E1 is inferred before any call of this function" is it true?
    
 More precisely:
@@ -430,7 +434,7 @@ fun foo(val content: String | ConnectionError | DbError) =
 
 > TODO: there is some issue with referring to `DbError` with name content.
 > Maybe it is reason why other languages introduce two return values for error and value.
-> IMO to store them in a single value much better, but maybe we need a syntax for creating a new name or inplace destruction could be enough.
+> IMO to store them in a single value much better, but maybe we need a syntax for creating a new name or in-place destruction could be enough.
 > ```kotlin
 > fun foo(val content: String | ConnectionError | DbError) =
 >     when (content) {
@@ -494,8 +498,6 @@ More precisely:
 5. `Value` is a supertype for all common classes.
 6. `Nothing` is a subtype for all types.
 
-> TODO: discuss: What do you think of this hacky hierarchy?
-> 
 > TODO: discuss: deprecation of `Any`? :) (Replace with `Top` =:= `Any?`)
 
 ### Operating with errors 2
@@ -549,17 +551,11 @@ As mentioned, all operators for nullable types become applicable for error types
   > 
   > TODO: discuss if we should filter out null even if there are other errors.
   > 
-  > TODO: discuss if it encourages usage of `Null` instead of meaningful errors.
+  > TODO: discuss if this limitation encourages usage of `Null` instead of meaningful errors.
   > 
   > TODO: Maybe we should filter out any single error in elvis operator? (what about typealias?)
 
 #### New operator
-
-TODO: discuss section on meeting
-
-> https://youtrack.jetbrains.com/issue/KT-68296/Union-Types-for-Errors#focus=Comments-27-9976626.0-0
-> 
-> Taking everything together, it seems like the boundary for pragmatism should be in defining these error unions and using them with existing constructs like the when statement without creating deconstructor syntactic sugar. While developers want to save lines when writing code, we spend 10 times more time reading code so we should prioritize clarity and obvious control flow over clever syntax.
 
 It is fine to apply all existing operators to errors, but with errors we may often encounter the following pattern:
 
@@ -705,8 +701,6 @@ With this approach and declaration of the error could be transformed into:
 
 ### Typing
 
-TODO: this section is outdated. To rewrite, see "Notes on type inference" in "Notes.md".
-
 #### Types
 
 - New types: `Error` (supertype for all errors), `Value` (supertype for all common types)
@@ -714,16 +708,16 @@ TODO: this section is outdated. To rewrite, see "Notes on type inference" in "No
 
 #### Well-formattedness
 
-> do we need to variables in the error component at all? (even in not signature types)
+> Do we need to variables in the error component at all? (even in not signature types)
 > 
-> do we need even two variables in different components (T | E)?
+> Do we need even two variables in different components (T | E)?
 > 
 > What is the use-case? What are the complications? Is it easily mapped to type inference?
 
 `A | B` is well-formed if:
 - `A` and `B` are well-formed
 - `B <: Error`
-- `B` does not contain 2 non-disjoint variables
+- `B` does not contain 2 non-disjoint not fixed variables
   > It means that errors may have forms:
   > - List of explicitly written error constants (further denoted as `Errs`)
   > - `E | Errs`, where E is an unbounded error variable
@@ -782,7 +776,6 @@ Possible solutions:
 #### Backward compatibility with nullability
 
 > TODO: review mapping, consider corner cases.
-> It is actually interesting in terms of strange subtyping of `Any`
 
 ### Relation to other features
 
@@ -829,7 +822,22 @@ We have to exclude the checked type from the union
 > ```
 > We should smart-cast `t` to `T & Value`
 
-## More examples of idiomatic code
+## Examples of idiomatic code
+
+In this section, we would like to discuss where this feature should be used.
+
+TODO: this section is not even close to be finished.
+
+### Library API
+
+If the library is not fixed to a single framework that has a specific error handling mechanism, 
+it is better for recoverable or expected errors to be represented as error unions.
+This will allow handling them in a straightforward way or convert them into framework-specific exceptions.
+Otherwise, it may lead to a lot of boilerplate code for converting errors from one type to another.
+
+TODO: more specific libraries
+
+### In-place tags
 
 TODO
 
@@ -872,11 +880,7 @@ typealias Tree = Unit | Node | Leaf
 ```
 
 All these cases are considered as a misuse of the feature.
-It looks impossible and impractical to prevent them so we have to rely on the developer's discipline.
-
-## References
-
-- [Marat's quip (April 11)](https://jetbrains.quip.com/fOg9A3IXwD4b/Restricted-union-types)
+It looks impossible and impractical to prevent them, so we have to rely on the developer's discipline.
 
 ## Future possibilities
 
@@ -935,16 +939,12 @@ But with local errors, it is possible to guarantee the correctness of non-exposu
 > we may introduce a common supertype for all errors plus all errors local to the current scope.
 > F.e. `Error@last` which is a supertype of `Error` and errors local to class of `last` and `last` function itself.
 
-> TODO: discuss if this feature really needed.
->
-> IMO it is too complicated, not so useful and does not align with the other language.
-
 ### Richer type system for errors
 
-TODO: Exclusions
+TODO: Set exclusions
 
-TODO: more complex non-disjoint cases for variables (E1 : Error, E2 : DBError)
+TODO: More complex non-disjoint cases for variables (E1 : Error, E2 : DBError)
 
-TODO?: `Err(v)` representing errors of variable(argument) `v`
+TODO: `Err(v)` representing errors of variable(argument) `v`
 
-TODO: `Int??` as a shorthand for `Int | Error` or `Int | $E`
+TODO: `Int??` as shorthand for `Int | Error` or `Int | $E`
